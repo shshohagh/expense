@@ -1,0 +1,125 @@
+import Database from 'better-sqlite3';
+import path from 'path';
+import bcrypt from 'bcryptjs';
+
+const db = new Database('database.sqlite');
+
+// Initialize tables
+db.exec(`
+  CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT UNIQUE NOT NULL,
+    password TEXT NOT NULL,
+    name TEXT,
+    role TEXT DEFAULT 'USER',
+    status TEXT DEFAULT 'PENDING',
+    currency TEXT DEFAULT 'USD',
+    language TEXT DEFAULT 'en',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS transactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    userId INTEGER NOT NULL,
+    type TEXT CHECK(type IN ('INCOME', 'EXPENSE')) NOT NULL,
+    amount REAL NOT NULL,
+    category TEXT NOT NULL,
+    date TEXT NOT NULL,
+    description TEXT,
+    status TEXT DEFAULT 'ACTIVE',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (userId) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS recurring_transactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    userId INTEGER NOT NULL,
+    type TEXT CHECK(type IN ('INCOME', 'EXPENSE')) NOT NULL,
+    amount REAL NOT NULL,
+    category TEXT NOT NULL,
+    frequency TEXT CHECK(frequency IN ('DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY')) NOT NULL,
+    startDate TEXT NOT NULL,
+    nextDate TEXT NOT NULL,
+    description TEXT,
+    active INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (userId) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS categories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    type TEXT CHECK(type IN ('INCOME', 'EXPENSE')) NOT NULL,
+    UNIQUE(name, type)
+  );
+
+  CREATE TABLE IF NOT EXISTS role_permissions (
+    role TEXT PRIMARY KEY,
+    permissions TEXT NOT NULL -- JSON array of permission strings
+  );
+`);
+
+// Migrations: Add currency and language columns if they don't exist
+const tableInfo = db.prepare("PRAGMA table_info(users)").all() as any[];
+const columns = tableInfo.map(c => c.name);
+
+if (!columns.includes('currency')) {
+  db.exec("ALTER TABLE users ADD COLUMN currency TEXT DEFAULT 'USD'");
+}
+if (!columns.includes('language')) {
+  db.exec("ALTER TABLE users ADD COLUMN language TEXT DEFAULT 'en'");
+}
+
+// Migration for transactions status
+const transactionTableInfo = db.prepare("PRAGMA table_info(transactions)").all() as any[];
+const transactionColumns = transactionTableInfo.map(c => c.name);
+if (!transactionColumns.includes('status')) {
+  db.exec("ALTER TABLE transactions ADD COLUMN status TEXT DEFAULT 'ACTIVE'");
+}
+
+// Seed default permissions
+const permissionCount = db.prepare('SELECT COUNT(*) as count FROM role_permissions').get() as { count: number };
+if (permissionCount.count === 0) {
+  const insertPermission = db.prepare('INSERT INTO role_permissions (role, permissions) VALUES (?, ?)');
+  insertPermission.run('USER', JSON.stringify([]));
+  insertPermission.run('ADMIN', JSON.stringify(['manage_categories', 'export_data']));
+  insertPermission.run('SUPER_ADMIN', JSON.stringify(['manage_users', 'manage_categories', 'export_data', 'view_admin_panel']));
+}
+
+// Seed default categories if empty
+const categoryCount = db.prepare('SELECT COUNT(*) as count FROM categories').get() as { count: number };
+if (categoryCount.count === 0) {
+  const insertCategory = db.prepare('INSERT INTO categories (name, type) VALUES (?, ?)');
+  const defaultCategories = [
+    ['Salary', 'INCOME'],
+    ['Freelance', 'INCOME'],
+    ['Investment', 'INCOME'],
+    ['Food', 'EXPENSE'],
+    ['Transport', 'EXPENSE'],
+    ['Rent', 'EXPENSE'],
+    ['Utilities', 'EXPENSE'],
+    ['Entertainment', 'EXPENSE'],
+    ['Healthcare', 'EXPENSE'],
+    ['Shopping', 'EXPENSE'],
+  ];
+  defaultCategories.forEach(([name, type]) => insertCategory.run(name, type));
+}
+
+// Seed Super Admin
+const adminEmail = 'shshohagh4@gmail.com';
+const adminPassword = 'Sohag66996853@#$';
+const adminName = 'Super Admin';
+
+const admin = db.prepare("SELECT * FROM users WHERE email = ?").get(adminEmail);
+if (!admin) {
+  const hashedPassword = bcrypt.hashSync(adminPassword, 10);
+  db.prepare("INSERT INTO users (email, password, name, role, status) VALUES (?, ?, ?, ?, ?)")
+    .run(adminEmail, hashedPassword, adminName, 'SUPER_ADMIN', 'APPROVED');
+  console.log('Super Admin seeded successfully.');
+} else {
+  // Ensure the existing user has the correct role and status if they are the requested admin
+  db.prepare("UPDATE users SET role = 'SUPER_ADMIN', status = 'APPROVED' WHERE email = ?")
+    .run(adminEmail);
+}
+
+export default db;
