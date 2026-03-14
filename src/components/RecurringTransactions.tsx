@@ -8,7 +8,8 @@ interface RecurringTransaction {
   id: number;
   type: 'INCOME' | 'EXPENSE';
   amount: number;
-  category: string;
+  categoryId: number;
+  categoryName?: string;
   frequency: 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY';
   startDate: string;
   nextDate: string;
@@ -35,7 +36,7 @@ export default function RecurringTransactions() {
   const [formData, setFormData] = useState({
     type: 'EXPENSE' as 'INCOME' | 'EXPENSE',
     amount: '',
-    category: '',
+    categoryId: '',
     frequency: 'MONTHLY' as 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY',
     startDate: new Date().toISOString().split('T')[0],
     nextDate: new Date().toISOString().split('T')[0],
@@ -118,7 +119,7 @@ export default function RecurringTransactions() {
     setFormData({
       type: 'EXPENSE',
       amount: '',
-      category: '',
+      categoryId: '',
       frequency: 'MONTHLY',
       startDate: new Date().toISOString().split('T')[0],
       nextDate: new Date().toISOString().split('T')[0],
@@ -132,7 +133,7 @@ export default function RecurringTransactions() {
     setFormData({
       type: rt.type,
       amount: rt.amount.toString(),
-      category: rt.category,
+      categoryId: rt.categoryId.toString(),
       frequency: rt.frequency,
       startDate: rt.startDate,
       nextDate: rt.nextDate,
@@ -191,7 +192,7 @@ export default function RecurringTransactions() {
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <h3 className="font-bold">{rt.description || rt.category}</h3>
+                    <h3 className="font-bold">{rt.description || rt.categoryName || 'Recurring'}</h3>
                     <span className="text-xs px-2 py-0.5 bg-zinc-100 dark:bg-zinc-800 rounded-full font-medium text-zinc-500">
                       {rt.frequency}
                     </span>
@@ -202,7 +203,7 @@ export default function RecurringTransactions() {
                     )}
                   </div>
                   <div className="flex items-center gap-4 mt-1 text-sm text-muted-foreground">
-                    <span className="flex items-center gap-1"><Tag size={14} /> {rt.category}</span>
+                    <span className="flex items-center gap-1"><Tag size={14} /> {rt.categoryName || 'Unknown'}</span>
                     <span className="flex items-center gap-1"><Calendar size={14} /> Next: {rt.nextDate}</span>
                   </div>
                 </div>
@@ -325,13 +326,13 @@ export default function RecurringTransactions() {
                     <label className="text-sm font-medium">Category</label>
                     <select
                       required
-                      value={formData.category}
-                      onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                      value={formData.categoryId}
+                      onChange={(e) => setFormData({ ...formData, categoryId: e.target.value })}
                       className="w-full px-4 py-2 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100"
                     >
                       <option value="">Select Category</option>
                       {filteredCategories.map(c => (
-                        <option key={c.id} value={c.name}>{c.name}</option>
+                        <option key={c.id} value={c.id}>{c.name}</option>
                       ))}
                     </select>
                   </div>

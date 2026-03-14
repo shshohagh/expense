@@ -68,11 +68,12 @@ export default function Dashboard() {
   const categoryData = activeTransactions
     .filter(t => t.type === 'EXPENSE')
     .reduce((acc: any[], t) => {
-      const existing = acc.find(item => item.name === t.category);
+      const catName = t.categoryName || 'Unknown';
+      const existing = acc.find(item => item.name === catName);
       if (existing) {
         existing.value += t.amount;
       } else {
-        acc.push({ name: t.category, value: t.amount });
+        acc.push({ name: catName, value: t.amount });
       }
       return acc;
     }, []);

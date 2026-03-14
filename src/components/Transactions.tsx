@@ -22,7 +22,7 @@ export default function Transactions() {
   const [formData, setFormData] = useState({
     type: 'EXPENSE',
     amount: '',
-    category: '',
+    categoryId: '',
     date: new Date().toISOString().split('T')[0],
     description: '',
     status: 'ACTIVE' as 'ACTIVE' | 'INACTIVE',
@@ -71,7 +71,7 @@ export default function Transactions() {
         setFormData({
           type: 'EXPENSE',
           amount: '',
-          category: '',
+          categoryId: '',
           date: new Date().toISOString().split('T')[0],
           description: '',
           status: 'ACTIVE',
@@ -200,7 +200,7 @@ export default function Transactions() {
               setFormData({
                 type: 'EXPENSE',
                 amount: '',
-                category: '',
+                categoryId: '',
                 date: new Date().toISOString().split('T')[0],
                 description: '',
               });
@@ -270,7 +270,7 @@ export default function Transactions() {
               {filteredTransactions.map((t) => (
                 <tr key={t.id} className={`hover:bg-zinc-50/50 dark:hover:bg-zinc-800/50 transition-colors ${t.status === 'INACTIVE' ? 'opacity-50 grayscale-[0.5]' : ''}`}>
                   <td className="px-6 py-4 text-sm">{formatDate(t.date)}</td>
-                  <td className="px-6 py-4 text-sm font-medium">{t.category}</td>
+                  <td className="px-6 py-4 text-sm font-medium">{(t as any).categoryName || 'Unknown'}</td>
                   <td className="px-6 py-4 text-sm text-muted-foreground">{t.description || '-'}</td>
                   <td className="px-6 py-4 text-sm">
                     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
@@ -299,7 +299,7 @@ export default function Transactions() {
                           setFormData({
                             type: t.type,
                             amount: t.amount.toString(),
-                            category: t.category,
+                            categoryId: t.categoryId.toString(),
                             date: t.date,
                             description: t.description || '',
                             status: t.status || 'ACTIVE',
@@ -420,13 +420,13 @@ export default function Transactions() {
                   <label className="text-sm font-medium">Category</label>
                   <select
                     required
-                    value={formData.category}
-                    onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                    value={formData.categoryId}
+                    onChange={(e) => setFormData({ ...formData, categoryId: e.target.value })}
                     className="w-full px-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100"
                   >
                     <option value="">Select Category</option>
                     {filteredCategories.map(c => (
-                      <option key={c.id} value={c.name}>{c.name}</option>
+                      <option key={c.id} value={c.id}>{c.name}</option>
                     ))}
                   </select>
                 </div>

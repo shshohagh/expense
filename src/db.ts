@@ -23,12 +23,14 @@ db.exec(`
     userId INTEGER NOT NULL,
     type TEXT CHECK(type IN ('INCOME', 'EXPENSE')) NOT NULL,
     amount REAL NOT NULL,
-    category TEXT NOT NULL,
+    categoryId INTEGER,
+    category TEXT, -- Keep for migration
     date TEXT NOT NULL,
     description TEXT,
     status TEXT DEFAULT 'ACTIVE',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (userId) REFERENCES users(id)
+    FOREIGN KEY (userId) REFERENCES users(id),
+    FOREIGN KEY (categoryId) REFERENCES categories(id)
   );
 
   CREATE TABLE IF NOT EXISTS recurring_transactions (
@@ -36,21 +38,25 @@ db.exec(`
     userId INTEGER NOT NULL,
     type TEXT CHECK(type IN ('INCOME', 'EXPENSE')) NOT NULL,
     amount REAL NOT NULL,
-    category TEXT NOT NULL,
+    categoryId INTEGER,
+    category TEXT, -- Keep for migration
     frequency TEXT CHECK(frequency IN ('DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY')) NOT NULL,
     startDate TEXT NOT NULL,
     nextDate TEXT NOT NULL,
     description TEXT,
     active INTEGER DEFAULT 1,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (userId) REFERENCES users(id)
+    FOREIGN KEY (userId) REFERENCES users(id),
+    FOREIGN KEY (categoryId) REFERENCES categories(id)
   );
 
   CREATE TABLE IF NOT EXISTS categories (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    userId INTEGER, -- NULL for global/default categories
     name TEXT NOT NULL,
     type TEXT CHECK(type IN ('INCOME', 'EXPENSE')) NOT NULL,
-    UNIQUE(name, type)
+    FOREIGN KEY (userId) REFERENCES users(id),
+    UNIQUE(userId, name, type)
   );
 
   CREATE TABLE IF NOT EXISTS role_permissions (
@@ -76,6 +82,45 @@ const transactionColumns = transactionTableInfo.map(c => c.name);
 if (!transactionColumns.includes('status')) {
   db.exec("ALTER TABLE transactions ADD COLUMN status TEXT DEFAULT 'ACTIVE'");
 }
+
+// Migration for categoryId and userId
+if (!transactionColumns.includes('categoryId')) {
+  db.exec("ALTER TABLE transactions ADD COLUMN categoryId INTEGER REFERENCES categories(id)");
+}
+
+const recurringTableInfo = db.prepare("PRAGMA table_info(recurring_transactions)").all() as any[];
+const recurringColumns = recurringTableInfo.map(c => c.name);
+if (!recurringColumns.includes('categoryId')) {
+  db.exec("ALTER TABLE recurring_transactions ADD COLUMN categoryId INTEGER REFERENCES categories(id)");
+}
+
+const categoryTableInfo = db.prepare("PRAGMA table_info(categories)").all() as any[];
+const categoryColumns = categoryTableInfo.map(c => c.name);
+if (!categoryColumns.includes('userId')) {
+  db.exec("ALTER TABLE categories ADD COLUMN userId INTEGER REFERENCES users(id)");
+  // Remove old unique constraint if possible, but SQLite doesn't support easy DROP CONSTRAINT.
+  // We'll just rely on the new table definition for new installs and this column for migrations.
+}
+
+// Data Migration: Map category names to IDs
+const migrateCategories = () => {
+  const transactions = db.prepare("SELECT id, category, type FROM transactions WHERE categoryId IS NULL").all() as any[];
+  for (const t of transactions) {
+    let cat = db.prepare("SELECT id FROM categories WHERE name = ? AND type = ?").get(t.category, t.type) as any;
+    if (cat) {
+      db.prepare("UPDATE transactions SET categoryId = ? WHERE id = ?").run(cat.id, t.id);
+    }
+  }
+
+  const recurring = db.prepare("SELECT id, category, type FROM recurring_transactions WHERE categoryId IS NULL").all() as any[];
+  for (const r of recurring) {
+    let cat = db.prepare("SELECT id FROM categories WHERE name = ? AND type = ?").get(r.category, r.type) as any;
+    if (cat) {
+      db.prepare("UPDATE recurring_transactions SET categoryId = ? WHERE id = ?").run(cat.id, r.id);
+    }
+  }
+};
+migrateCategories();
 
 // Seed default permissions
 const permissionCount = db.prepare('SELECT COUNT(*) as count FROM role_permissions').get() as { count: number };

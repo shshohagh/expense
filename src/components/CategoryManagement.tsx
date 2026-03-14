@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'motion/react';
 
 interface Category {
   id: number;
+  userId: number | null;
   name: string;
   type: 'INCOME' | 'EXPENSE';
 }
@@ -90,6 +91,10 @@ export default function CategoryManagement() {
   };
 
   const openEditModal = (cat: Category) => {
+    if (cat.userId === null && user?.role !== 'SUPER_ADMIN') {
+      alert('You cannot edit global categories.');
+      return;
+    }
     setEditingCategory(cat);
     setFormData({
       name: cat.name,
@@ -98,9 +103,11 @@ export default function CategoryManagement() {
     setIsModalOpen(true);
   };
 
-  if (user?.role !== 'SUPER_ADMIN' && !user?.permissions?.includes('manage_categories')) {
-    return <div className="p-8 text-center">Access Denied. You do not have permission to manage categories.</div>;
-  }
+  const canManage = (cat: Category) => {
+    return cat.userId !== null || user?.role === 'SUPER_ADMIN';
+  };
+
+  // Everyone can now manage their own categories
 
   return (
     <div className="space-y-6">
@@ -130,6 +137,8 @@ export default function CategoryManagement() {
           onEdit={openEditModal}
           onDelete={handleDelete}
           type="INCOME"
+          currentUserId={user?.id}
+          userRole={user?.role}
         />
         
         {/* Expense Categories */}
@@ -139,6 +148,8 @@ export default function CategoryManagement() {
           onEdit={openEditModal}
           onDelete={handleDelete}
           type="EXPENSE"
+          currentUserId={user?.id}
+          userRole={user?.role}
         />
       </div>
 
@@ -230,12 +241,14 @@ export default function CategoryManagement() {
   );
 }
 
-function CategorySection({ title, categories, onEdit, onDelete, type }: { 
+function CategorySection({ title, categories, onEdit, onDelete, type, currentUserId, userRole }: { 
   title: string, 
   categories: Category[], 
   onEdit: (c: Category) => void, 
   onDelete: (id: number) => void,
-  type: 'INCOME' | 'EXPENSE'
+  type: 'INCOME' | 'EXPENSE',
+  currentUserId?: number,
+  userRole?: string
 }) {
   return (
     <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden shadow-sm">
@@ -250,32 +263,42 @@ function CategorySection({ title, categories, onEdit, onDelete, type }: {
             No categories found.
           </div>
         ) : (
-          categories.map((cat) => (
-            <div key={cat.id} className="p-4 flex items-center justify-between hover:bg-zinc-50/50 dark:hover:bg-zinc-800/50 transition-colors">
-              <div className="flex items-center gap-3">
-                <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-                  type === 'INCOME' ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'
-                }`}>
-                  <Tag size={16} />
+          categories.map((cat) => {
+            const isGlobal = cat.userId === null;
+            const canManage = !isGlobal || userRole === 'SUPER_ADMIN';
+            
+            return (
+              <div key={cat.id} className="p-4 flex items-center justify-between hover:bg-zinc-50/50 dark:hover:bg-zinc-800/50 transition-colors">
+                <div className="flex items-center gap-3">
+                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+                    type === 'INCOME' ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'
+                  }`}>
+                    <Tag size={16} />
+                  </div>
+                  <div className="flex flex-col">
+                    <span className="font-medium">{cat.name}</span>
+                    {isGlobal && <span className="text-[10px] text-muted-foreground uppercase tracking-wider">Global</span>}
+                  </div>
                 </div>
-                <span className="font-medium">{cat.name}</span>
+                {canManage && (
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => onEdit(cat)}
+                      className="p-2 text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
+                    >
+                      <Edit2 size={16} />
+                    </button>
+                    <button
+                      onClick={() => onDelete(cat.id)}
+                      className="p-2 text-zinc-500 hover:text-rose-600 transition-colors"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                )}
               </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => onEdit(cat)}
-                  className="p-2 text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
-                >
-                  <Edit2 size={16} />
-                </button>
-                <button
-                  onClick={() => onDelete(cat.id)}
-                  className="p-2 text-zinc-500 hover:text-rose-600 transition-colors"
-                >
-                  <Trash2 size={16} />
-                </button>
-              </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
     </div>

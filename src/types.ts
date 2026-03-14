@@ -15,7 +15,8 @@ export interface Transaction {
   userId: number;
   type: 'INCOME' | 'EXPENSE';
   amount: number;
-  category: string;
+  categoryId: number;
+  categoryName?: string;
   date: string;
   description: string;
   status: 'ACTIVE' | 'INACTIVE';
@@ -24,6 +25,7 @@ export interface Transaction {
 
 export interface Category {
   id: number;
+  userId: number | null;
   name: string;
   type: 'INCOME' | 'EXPENSE';
 }

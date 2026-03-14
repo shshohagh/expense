@@ -195,8 +195,8 @@ async function startServer() {
       let nextDate = new Date(rt.nextDate);
       while (nextDate.toISOString().split('T')[0] <= todayStr) {
         // Create transaction
-        db.prepare("INSERT INTO transactions (userId, type, amount, category, date, description) VALUES (?, ?, ?, ?, ?, ?)")
-          .run(userId, rt.type, rt.amount, rt.category, nextDate.toISOString().split('T')[0], `Recurring: ${rt.description || rt.category}`);
+        db.prepare("INSERT INTO transactions (userId, type, amount, categoryId, date, description) VALUES (?, ?, ?, ?, ?, ?)")
+          .run(userId, rt.type, rt.amount, rt.categoryId, nextDate.toISOString().split('T')[0], `Recurring: ${rt.description || 'Recurring'}`);
 
         // Update next date
         if (rt.frequency === 'DAILY') nextDate.setDate(nextDate.getDate() + 1);
@@ -211,31 +211,42 @@ async function startServer() {
 
   app.get("/api/transactions", authenticateToken, (req: any, res) => {
     processRecurringTransactions(req.user.id);
-    const transactions = db.prepare("SELECT * FROM transactions WHERE userId = ? ORDER BY date DESC").all(req.user.id);
+    const transactions = db.prepare(`
+      SELECT t.*, c.name as categoryName 
+      FROM transactions t 
+      LEFT JOIN categories c ON t.categoryId = c.id 
+      WHERE t.userId = ? 
+      ORDER BY t.date DESC
+    `).all(req.user.id);
     res.json(transactions);
   });
 
   app.get("/api/recurring-transactions", authenticateToken, (req: any, res) => {
-    const recurring = db.prepare("SELECT * FROM recurring_transactions WHERE userId = ?").all(req.user.id);
+    const recurring = db.prepare(`
+      SELECT rt.*, c.name as categoryName 
+      FROM recurring_transactions rt 
+      LEFT JOIN categories c ON rt.categoryId = c.id 
+      WHERE rt.userId = ?
+    `).all(req.user.id);
     res.json(recurring);
   });
 
   app.post("/api/recurring-transactions", authenticateToken, (req: any, res) => {
-    const { type, amount, category, frequency, startDate, description } = req.body;
-    const stmt = db.prepare("INSERT INTO recurring_transactions (userId, type, amount, category, frequency, startDate, nextDate, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
-    const result = stmt.run(req.user.id, type, amount, category, frequency, startDate, startDate, description);
+    const { type, amount, categoryId, frequency, startDate, description } = req.body;
+    const stmt = db.prepare("INSERT INTO recurring_transactions (userId, type, amount, categoryId, frequency, startDate, nextDate, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+    const result = stmt.run(req.user.id, type, amount, categoryId, frequency, startDate, startDate, description);
     res.status(201).json({ id: result.lastInsertRowid });
   });
 
   app.put("/api/recurring-transactions/:id", authenticateToken, (req: any, res) => {
-    const { type, amount, category, frequency, startDate, nextDate, description, active } = req.body;
+    const { type, amount, categoryId, frequency, startDate, nextDate, description, active } = req.body;
     
     // Fallback to startDate if nextDate is missing
     const finalNextDate = nextDate || startDate;
     
     try {
-      const stmt = db.prepare("UPDATE recurring_transactions SET type = ?, amount = ?, category = ?, frequency = ?, startDate = ?, nextDate = ?, description = ?, active = ? WHERE id = ? AND userId = ?");
-      stmt.run(type, amount, category, frequency, startDate, finalNextDate, description, active ? 1 : 0, req.params.id, req.user.id);
+      const stmt = db.prepare("UPDATE recurring_transactions SET type = ?, amount = ?, categoryId = ?, frequency = ?, startDate = ?, nextDate = ?, description = ?, active = ? WHERE id = ? AND userId = ?");
+      stmt.run(type, amount, categoryId, frequency, startDate, finalNextDate, description, active ? 1 : 0, req.params.id, req.user.id);
       res.json({ message: "Recurring transaction updated" });
     } catch (error: any) {
       res.status(400).json({ error: error.message });
@@ -249,16 +260,16 @@ async function startServer() {
 
   // Transactions
   app.post("/api/transactions", authenticateToken, (req: any, res) => {
-    const { type, amount, category, date, description, status } = req.body;
-    const stmt = db.prepare("INSERT INTO transactions (userId, type, amount, category, date, description, status) VALUES (?, ?, ?, ?, ?, ?, ?)");
-    const result = stmt.run(req.user.id, type, amount, category, date, description, status || 'ACTIVE');
+    const { type, amount, categoryId, date, description, status } = req.body;
+    const stmt = db.prepare("INSERT INTO transactions (userId, type, amount, categoryId, date, description, status) VALUES (?, ?, ?, ?, ?, ?, ?)");
+    const result = stmt.run(req.user.id, type, amount, categoryId, date, description, status || 'ACTIVE');
     res.status(201).json({ id: result.lastInsertRowid });
   });
 
   app.put("/api/transactions/:id", authenticateToken, (req: any, res) => {
-    const { type, amount, category, date, description, status } = req.body;
-    const stmt = db.prepare("UPDATE transactions SET type = ?, amount = ?, category = ?, date = ?, description = ?, status = ? WHERE id = ? AND userId = ?");
-    stmt.run(type, amount, category, date, description, status, req.params.id, req.user.id);
+    const { type, amount, categoryId, date, description, status } = req.body;
+    const stmt = db.prepare("UPDATE transactions SET type = ?, amount = ?, categoryId = ?, date = ?, description = ?, status = ? WHERE id = ? AND userId = ?");
+    stmt.run(type, amount, categoryId, date, description, status, req.params.id, req.user.id);
     res.json({ message: "Transaction updated" });
   });
 
@@ -268,36 +279,36 @@ async function startServer() {
   });
 
   // Categories
-  app.get("/api/categories", authenticateToken, (req, res) => {
-    const categories = db.prepare("SELECT * FROM categories").all();
+  app.get("/api/categories", authenticateToken, (req: any, res) => {
+    const categories = db.prepare("SELECT * FROM categories WHERE userId IS NULL OR userId = ?").all(req.user.id);
     res.json(categories);
   });
 
-  app.post("/api/categories", authenticateToken, hasPermission('manage_categories'), (req, res) => {
+  app.post("/api/categories", authenticateToken, (req: any, res) => {
     const { name, type } = req.body;
     try {
-      const stmt = db.prepare("INSERT INTO categories (name, type) VALUES (?, ?)");
-      stmt.run(name, type);
+      const stmt = db.prepare("INSERT INTO categories (userId, name, type) VALUES (?, ?, ?)");
+      stmt.run(req.user.id, name, type);
       res.status(201).json({ message: "Category created" });
     } catch (error: any) {
       res.status(400).json({ error: error.message });
     }
   });
 
-  app.put("/api/categories/:id", authenticateToken, hasPermission('manage_categories'), (req, res) => {
+  app.put("/api/categories/:id", authenticateToken, (req: any, res) => {
     const { name, type } = req.body;
     try {
-      const stmt = db.prepare("UPDATE categories SET name = ?, type = ? WHERE id = ?");
-      stmt.run(name, type, req.params.id);
+      const stmt = db.prepare("UPDATE categories SET name = ?, type = ? WHERE id = ? AND (userId = ? OR ? = 'SUPER_ADMIN')");
+      stmt.run(name, type, req.params.id, req.user.id, req.user.role);
       res.json({ message: "Category updated" });
     } catch (error: any) {
       res.status(400).json({ error: error.message });
     }
   });
 
-  app.delete("/api/categories/:id", authenticateToken, hasPermission('manage_categories'), (req, res) => {
+  app.delete("/api/categories/:id", authenticateToken, (req: any, res) => {
     try {
-      db.prepare("DELETE FROM categories WHERE id = ?").run(req.params.id);
+      db.prepare("DELETE FROM categories WHERE id = ? AND (userId = ? OR ? = 'SUPER_ADMIN')").run(req.params.id, req.user.id, req.user.role);
       res.json({ message: "Category deleted" });
     } catch (error: any) {
       res.status(400).json({ error: error.message });
@@ -305,8 +316,114 @@ async function startServer() {
   });
 
   // Export
+  app.get("/api/user/export-json", authenticateToken, (req: any, res) => {
+    try {
+      const userId = req.user.id;
+      
+      const user = db.prepare("SELECT id, email, name, role, currency, language, created_at FROM users WHERE id = ?").get(userId) as any;
+      const transactions = db.prepare("SELECT * FROM transactions WHERE userId = ?").all(userId);
+      const recurring = db.prepare("SELECT * FROM recurring_transactions WHERE userId = ?").all(userId);
+      const categories = db.prepare("SELECT * FROM categories WHERE userId = ? OR userId IS NULL").all(userId);
+      
+      const exportData = {
+        profile: user,
+        transactions: transactions,
+        recurringTransactions: recurring,
+        categories: categories,
+        exportDate: new Date().toISOString(),
+        version: "1.1"
+      };
+      
+      res.setHeader('Content-Disposition', `attachment; filename="expense_data_export_${userId}.json"`);
+      res.setHeader('Content-Type', 'application/json');
+      res.send(JSON.stringify(exportData, null, 2));
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/user/restore-json", authenticateToken, (req: any, res) => {
+    const { profile, transactions, recurringTransactions, categories } = req.body;
+    const userId = req.user.id;
+
+    try {
+      // Start a transaction for data integrity
+      const transaction = db.transaction(() => {
+        // 1. Restore categories if they exist in the export
+        if (categories && Array.isArray(categories)) {
+          const insertCategory = db.prepare(`
+            INSERT OR IGNORE INTO categories (userId, name, type)
+            VALUES (?, ?, ?)
+          `);
+          for (const cat of categories) {
+            insertCategory.run(userId, cat.name, cat.type);
+          }
+        }
+
+        // 2. Delete existing data
+        db.prepare("DELETE FROM transactions WHERE userId = ?").run(userId);
+        db.prepare("DELETE FROM recurring_transactions WHERE userId = ?").run(userId);
+
+        // Helper to get categoryId by name for this user
+        const getCatId = (name: string, type: string) => {
+          const row = db.prepare("SELECT id FROM categories WHERE name = ? AND type = ? AND (userId = ? OR userId IS NULL)").get(name, type, userId) as any;
+          return row ? row.id : null;
+        };
+
+        // 3. Restore transactions
+        const insertTransaction = db.prepare(`
+          INSERT INTO transactions (userId, type, amount, categoryId, date, description, status)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `);
+        for (const t of transactions) {
+          let finalCategoryId = t.categoryId;
+          if (!finalCategoryId && t.category) {
+            finalCategoryId = getCatId(t.category, t.type);
+          }
+          
+          if (finalCategoryId) {
+            insertTransaction.run(userId, t.type, t.amount, finalCategoryId, t.date, t.description, t.status || 'ACTIVE');
+          }
+        }
+
+        // 4. Restore recurring transactions
+        const insertRecurring = db.prepare(`
+          INSERT INTO recurring_transactions (userId, type, amount, categoryId, frequency, startDate, nextDate, description, active)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        for (const rt of recurringTransactions) {
+          let finalCategoryId = rt.categoryId;
+          if (!finalCategoryId && rt.category) {
+            finalCategoryId = getCatId(rt.category, rt.type);
+          }
+          
+          if (finalCategoryId) {
+            insertRecurring.run(userId, rt.type, rt.amount, finalCategoryId, rt.frequency, rt.startDate, rt.nextDate, rt.description, rt.active);
+          }
+        }
+
+        // 5. Update profile if provided
+        if (profile) {
+          db.prepare("UPDATE users SET currency = ?, language = ? WHERE id = ?")
+            .run(profile.currency || 'USD', profile.language || 'en', userId);
+        }
+      });
+
+      transaction();
+      res.json({ message: "Data restored successfully" });
+    } catch (error: any) {
+      console.error('Restore error:', error);
+      res.status(400).json({ error: "Invalid data format or database error" });
+    }
+  });
+
   app.get("/api/export/:format", authenticateToken, hasPermission('export_data'), (req: any, res) => {
-    const transactions = db.prepare("SELECT type, amount, category, date, description FROM transactions WHERE userId = ?").all(req.user.id);
+    const transactions = db.prepare(`
+      SELECT t.type, t.amount, c.name as category, t.date, t.description 
+      FROM transactions t 
+      LEFT JOIN categories c ON t.categoryId = c.id 
+      WHERE t.userId = ?
+    `).all(req.user.id);
     
     if (req.params.format === 'csv' || req.params.format === 'xlsx') {
       const ws = xlsx.utils.json_to_sheet(transactions);
