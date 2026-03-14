@@ -85,9 +85,26 @@ export const t = (key: string, lang: string = 'en') => {
 
 export const formatCurrency = (amount: number, currencyCode: string = 'USD', lang: string = 'en', options: Intl.NumberFormatOptions = {}) => {
   const currency = currencies.find(c => c.code === currencyCode) || currencies[0];
-  return new Intl.NumberFormat(lang === 'bn' ? 'bn-BD' : 'en-US', {
-    style: 'currency',
-    currency: currency.code,
-    ...options
-  }).format(amount);
+  
+  // Set up base options with defaults
+  const baseOptions: Intl.NumberFormatOptions = {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+    style: 'decimal',
+    ...options,
+  };
+
+  // Safety check: Intl.NumberFormat throws if minimumFractionDigits > maximumFractionDigits
+  if (baseOptions.maximumFractionDigits !== undefined && 
+      (baseOptions.minimumFractionDigits || 0) > baseOptions.maximumFractionDigits) {
+    baseOptions.minimumFractionDigits = baseOptions.maximumFractionDigits;
+  }
+
+  const numberFormat = new Intl.NumberFormat(lang === 'bn' ? 'bn-BD' : 'en-US', baseOptions);
+  
+  const formatted = numberFormat.format(Math.abs(amount));
+  const sign = amount < 0 ? '-' : '';
+  
+  // Ensure the symbol is always at the front as requested
+  return `${sign}${currency.symbol}${formatted}`;
 };
