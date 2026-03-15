@@ -1,25 +1,41 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { Transaction } from '../types';
+import { Transaction, Budget } from '../types';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
   LineChart, Line, Cell, PieChart, Pie, Legend 
 } from 'recharts';
 import { formatCurrency, t } from '../utils/i18n';
-import { ArrowUpCircle, ArrowDownCircle, Wallet, TrendingUp, TrendingDown } from 'lucide-react';
-import { motion } from 'motion/react';
+import { 
+  ArrowUpCircle, ArrowDownCircle, Wallet, TrendingUp, TrendingDown, 
+  Eye, EyeOff, Target, PiggyBank, Percent, Calendar
+} from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 
 export default function Dashboard() {
   const { token, user } = useAuth();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [budgets, setBudgets] = useState<Budget[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showBalance, setShowBalance] = useState(false);
+  const timeoutRef = React.useRef<NodeJS.Timeout | null>(null);
 
   const lang = user?.language || 'en';
   const currency = user?.currency || 'USD';
 
   useEffect(() => {
     fetchTransactions();
+    fetchBudgets();
+    return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
   }, []);
+
+  const toggleBalance = () => {
+    setShowBalance(true);
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    timeoutRef.current = setTimeout(() => setShowBalance(false), 5000);
+  };
 
   const fetchTransactions = async () => {
     try {
@@ -37,6 +53,20 @@ export default function Dashboard() {
     }
   };
 
+  const fetchBudgets = async () => {
+    try {
+      const res = await fetch('/api/budgets', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setBudgets(data);
+      }
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
   const activeTransactions = transactions.filter(t => t.status === 'ACTIVE' || !t.status);
 
   const totalIncome = activeTransactions
@@ -47,7 +77,30 @@ export default function Dashboard() {
     .filter(t => t.type === 'EXPENSE')
     .reduce((acc, t) => acc + t.amount, 0);
 
+  const totalBudget = budgets.reduce((acc, b) => acc + b.amount, 0);
+
   const balance = totalIncome - totalExpense;
+
+  // Monthly Summary Calculations
+  const now = new Date();
+  const currentMonth = now.getMonth();
+  const currentYear = now.getFullYear();
+
+  const thisMonthTransactions = activeTransactions.filter(t => {
+    const d = new Date(t.date);
+    return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+  });
+
+  const thisMonthIncome = thisMonthTransactions
+    .filter(t => t.type === 'INCOME')
+    .reduce((acc, t) => acc + t.amount, 0);
+
+  const thisMonthExpense = thisMonthTransactions
+    .filter(t => t.type === 'EXPENSE')
+    .reduce((acc, t) => acc + t.amount, 0);
+
+  const thisMonthSavings = thisMonthIncome - thisMonthExpense;
+  const savingsRate = thisMonthIncome > 0 ? (thisMonthSavings / thisMonthIncome) * 100 : 0;
 
   // Prepare chart data (last 7 days)
   const last7Days = Array.from({ length: 7 }, (_, i) => {
@@ -89,7 +142,7 @@ export default function Dashboard() {
         <p className="text-muted-foreground">Welcome back! Here's an overview of your finances.</p>
       </header>
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         <motion.div 
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -102,6 +155,23 @@ export default function Dashboard() {
             <div>
               <p className="text-sm font-medium text-muted-foreground">{t('income', lang)}</p>
               <h2 className="text-2xl font-bold text-emerald-600">{formatCurrency(totalIncome, currency, lang)}</h2>
+            </div>
+          </div>
+        </motion.div>
+
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.05 }}
+          className="p-6 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm"
+        >
+          <div className="flex items-center gap-4">
+            <div className="p-3 bg-purple-100 dark:bg-purple-900/30 text-purple-600 rounded-xl">
+              <Target size={24} />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-muted-foreground">{t('budgets', lang)}</p>
+              <h2 className="text-2xl font-bold text-purple-600">{formatCurrency(totalBudget, currency, lang)}</h2>
             </div>
           </div>
         </motion.div>
@@ -127,19 +197,121 @@ export default function Dashboard() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.2 }}
-          className="p-6 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm"
+          onClick={toggleBalance}
+          whileTap={{ scale: 0.98 }}
+          className="p-6 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm cursor-pointer relative overflow-hidden group"
         >
           <div className="flex items-center gap-4">
             <div className="p-3 bg-blue-100 dark:bg-blue-900/30 text-blue-600 rounded-xl">
               <Wallet size={24} />
             </div>
             <div>
-              <p className="text-sm font-medium text-muted-foreground">{t('total_balance', lang)}</p>
-              <h2 className="text-2xl font-bold">{formatCurrency(balance, currency, lang)}</h2>
+              <p className="text-sm font-medium text-muted-foreground flex items-center gap-2">
+                {t('total_balance', lang)}
+                {showBalance ? <Eye size={14} /> : <EyeOff size={14} />}
+              </p>
+              <h2 className="text-2xl font-bold transition-all duration-300">
+                <AnimatePresence mode="wait">
+                  <motion.span
+                    key={showBalance ? 'visible' : 'hidden'}
+                    initial={{ opacity: 0, y: 5 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -5 }}
+                    transition={{ duration: 0.2 }}
+                  >
+                    {showBalance ? formatCurrency(balance, currency, lang) : '••••••'}
+                  </motion.span>
+                </AnimatePresence>
+              </h2>
             </div>
           </div>
+          {!showBalance && (
+            <div className="absolute inset-0 bg-blue-500/5 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600">Tap to show</span>
+            </div>
+          )}
         </motion.div>
       </div>
+
+      <section className="space-y-4">
+        <div className="flex items-center gap-2 text-zinc-500 dark:text-zinc-400">
+          <Calendar size={18} />
+          <h2 className="text-sm font-semibold uppercase tracking-wider">
+            {new Date().toLocaleDateString(lang, { month: 'long', year: 'numeric' })} Summary
+          </h2>
+        </div>
+        
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: 0.1 }}
+            className="p-4 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm"
+          >
+            <div className="flex justify-between items-start mb-2">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Monthly Income</p>
+              <div className="p-1.5 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 rounded-lg">
+                <TrendingUp size={14} />
+              </div>
+            </div>
+            <h3 className="text-xl font-bold">{formatCurrency(thisMonthIncome, currency, lang)}</h3>
+          </motion.div>
+
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: 0.2 }}
+            className="p-4 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm"
+          >
+            <div className="flex justify-between items-start mb-2">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Monthly Expense</p>
+              <div className="p-1.5 bg-rose-50 dark:bg-rose-900/20 text-rose-600 rounded-lg">
+                <TrendingDown size={14} />
+              </div>
+            </div>
+            <h3 className="text-xl font-bold">{formatCurrency(thisMonthExpense, currency, lang)}</h3>
+          </motion.div>
+
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: 0.3 }}
+            className="p-4 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm"
+          >
+            <div className="flex justify-between items-start mb-2">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Net Savings</p>
+              <div className="p-1.5 bg-blue-50 dark:bg-blue-900/20 text-blue-600 rounded-lg">
+                <PiggyBank size={14} />
+              </div>
+            </div>
+            <h3 className={`text-xl font-bold ${thisMonthSavings >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+              {formatCurrency(thisMonthSavings, currency, lang)}
+            </h3>
+          </motion.div>
+
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: 0.4 }}
+            className="p-4 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm"
+          >
+            <div className="flex justify-between items-start mb-2">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Savings Rate</p>
+              <div className="p-1.5 bg-amber-50 dark:bg-amber-900/20 text-amber-600 rounded-lg">
+                <Percent size={14} />
+              </div>
+            </div>
+            <h3 className="text-xl font-bold">{savingsRate.toFixed(1)}%</h3>
+            <div className="mt-2 w-full bg-zinc-100 dark:bg-zinc-800 h-1.5 rounded-full overflow-hidden">
+              <motion.div 
+                initial={{ width: 0 }}
+                animate={{ width: `${Math.max(0, Math.min(100, savingsRate))}%` }}
+                className="h-full bg-amber-500"
+              />
+            </div>
+          </motion.div>
+        </div>
+      </section>
 
       <div className="grid gap-8 md:grid-cols-2">
         <div className="p-6 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm">

@@ -327,6 +327,51 @@ async function startServer() {
     res.json({ message: "Transaction deleted" });
   });
 
+  // Budgets
+  app.get("/api/budgets", authenticateToken, (req: any, res) => {
+    const budgets = db.prepare(`
+      SELECT b.*, c.name as categoryName 
+      FROM budgets b 
+      JOIN categories c ON b.categoryId = c.id 
+      WHERE b.userId = ?
+    `).all(req.user.id);
+    res.json(budgets);
+  });
+
+  app.post("/api/budgets", authenticateToken, (req: any, res) => {
+    const { categoryId, amount, period } = req.body;
+    try {
+      const stmt = db.prepare("INSERT INTO budgets (userId, categoryId, amount, period) VALUES (?, ?, ?, ?)");
+      const result = stmt.run(req.user.id, categoryId, amount, period || 'MONTHLY');
+      logActivity(req.user.id, req.user.email, 'ADD_BUDGET', `Added budget for category #${categoryId} of ${amount}`);
+      res.status(201).json({ id: result.lastInsertRowid });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.put("/api/budgets/:id", authenticateToken, (req: any, res) => {
+    const { amount, period } = req.body;
+    try {
+      const stmt = db.prepare("UPDATE budgets SET amount = ?, period = ? WHERE id = ? AND userId = ?");
+      stmt.run(amount, period, req.params.id, req.user.id);
+      logActivity(req.user.id, req.user.email, 'UPDATE_BUDGET', `Updated budget #${req.params.id}`);
+      res.json({ message: "Budget updated" });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/budgets/:id", authenticateToken, (req: any, res) => {
+    try {
+      db.prepare("DELETE FROM budgets WHERE id = ? AND userId = ?").run(req.params.id, req.user.id);
+      logActivity(req.user.id, req.user.email, 'DELETE_BUDGET', `Deleted budget #${req.params.id}`);
+      res.json({ message: "Budget deleted" });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
   // Categories
   app.get("/api/categories", authenticateToken, (req: any, res) => {
     const categories = db.prepare("SELECT * FROM categories WHERE userId IS NULL OR userId = ?").all(req.user.id);
@@ -374,12 +419,19 @@ async function startServer() {
       const user = db.prepare("SELECT id, email, name, role, currency, language, created_at FROM users WHERE id = ?").get(userId) as any;
       const transactions = db.prepare("SELECT * FROM transactions WHERE userId = ?").all(userId);
       const recurring = db.prepare("SELECT * FROM recurring_transactions WHERE userId = ?").all(userId);
+      const budgets = db.prepare(`
+        SELECT b.*, c.name as categoryName 
+        FROM budgets b 
+        JOIN categories c ON b.categoryId = c.id 
+        WHERE b.userId = ?
+      `).all(userId);
       const categories = db.prepare("SELECT * FROM categories WHERE userId = ? OR userId IS NULL").all(userId);
       
       const exportData = {
         profile: user,
         transactions: transactions,
         recurringTransactions: recurring,
+        budgets: budgets,
         categories: categories,
         exportDate: new Date().toISOString(),
         version: "1.1"
@@ -394,7 +446,7 @@ async function startServer() {
   });
 
   app.post("/api/user/restore-json", authenticateToken, (req: any, res) => {
-    const { profile, transactions, recurringTransactions, categories } = req.body;
+    const { profile, transactions, recurringTransactions, categories, budgets } = req.body;
     const userId = req.user.id;
 
     try {
@@ -450,6 +502,30 @@ async function startServer() {
           
           if (finalCategoryId) {
             insertRecurring.run(userId, rt.type, rt.amount, finalCategoryId, rt.frequency, rt.startDate, rt.nextDate, rt.description, rt.active);
+          }
+        }
+
+        // 5. Restore budgets
+        if (budgets && Array.isArray(budgets)) {
+          db.prepare("DELETE FROM budgets WHERE userId = ?").run(userId);
+          const insertBudget = db.prepare(`
+            INSERT INTO budgets (userId, categoryId, amount, period)
+            VALUES (?, ?, ?, ?)
+          `);
+          for (const b of budgets) {
+            let finalCategoryId = b.categoryId;
+            // If we have categoryName in the export, try to look it up to be safe
+            if (b.categoryName) {
+              finalCategoryId = getCatId(b.categoryName, 'EXPENSE');
+            }
+            
+            if (finalCategoryId) {
+              try {
+                insertBudget.run(userId, finalCategoryId, b.amount, b.period || 'MONTHLY');
+              } catch (e) {
+                console.error("Failed to restore budget:", e);
+              }
+            }
           }
         }
 

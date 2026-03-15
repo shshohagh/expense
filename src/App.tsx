@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from './contexts/AuthContext';
 import Auth from './components/Auth';
 import Dashboard from './components/Dashboard';
@@ -9,7 +9,8 @@ import RecurringTransactions from './components/RecurringTransactions';
 import Profile from './components/Profile';
 import UserActivity from './components/UserActivity';
 import Reports from './components/Reports';
-import { t } from './utils/i18n';
+import BudgetManagement from './components/BudgetManagement';
+import { t, formatCurrency } from './utils/i18n';
 import { 
   LayoutDashboard, 
   Receipt, 
@@ -21,18 +22,58 @@ import {
   Tags,
   Repeat,
   History,
-  FileText
+  FileText,
+  Wallet as WalletIcon,
+  Target,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
-type View = 'dashboard' | 'transactions' | 'admin' | 'profile' | 'categories' | 'recurring' | 'activity' | 'reports';
+type View = 'dashboard' | 'transactions' | 'admin' | 'profile' | 'categories' | 'recurring' | 'activity' | 'reports' | 'budgets';
 
 export default function App() {
   const { isAuthenticated, isLoading, user, logout, token } = useAuth();
   const [currentView, setCurrentView] = useState<View>('dashboard');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [topBalance, setTopBalance] = useState<number | null>(null);
+  const [showTopBalance, setShowTopBalance] = useState(false);
+  const topBalanceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const lang = user?.language || 'en';
+  const currency = user?.currency || 'USD';
+
+  const fetchBalance = async () => {
+    if (!token) return;
+    try {
+      const res = await fetch('/api/transactions', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const transactions = await res.json();
+        const activeTransactions = transactions.filter((t: any) => t.status === 'ACTIVE' || !t.status);
+        const income = activeTransactions.filter((t: any) => t.type === 'INCOME').reduce((acc: number, t: any) => acc + t.amount, 0);
+        const expense = activeTransactions.filter((t: any) => t.type === 'EXPENSE').reduce((acc: number, t: any) => acc + t.amount, 0);
+        setTopBalance(income - expense);
+      }
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  const handleTopWalletClick = () => {
+    fetchBalance();
+    setShowTopBalance(true);
+    if (topBalanceTimeoutRef.current) clearTimeout(topBalanceTimeoutRef.current);
+    topBalanceTimeoutRef.current = setTimeout(() => setShowTopBalance(false), 5000);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (topBalanceTimeoutRef.current) clearTimeout(topBalanceTimeoutRef.current);
+    };
+  }, []);
 
   if (isLoading) {
     return (
@@ -49,6 +90,7 @@ export default function App() {
   const navItems = [
     { id: 'dashboard', label: t('dashboard', lang), icon: LayoutDashboard },
     { id: 'transactions', label: t('transactions', lang), icon: Receipt },
+    { id: 'budgets', label: t('budgets', lang), icon: Target },
     { id: 'reports', label: t('reports', lang), icon: FileText },
     { id: 'recurring', label: t('recurring', lang), icon: Repeat },
     { id: 'activity', label: 'Activity', icon: History },
@@ -73,10 +115,28 @@ export default function App() {
             {isMobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
           </button>
           <div className="flex items-center gap-3 text-zinc-900 dark:text-white">
-            <div className="w-8 h-8 bg-zinc-900 dark:bg-white rounded-lg flex items-center justify-center text-white dark:text-zinc-900">
-              <Wallet size={20} />
+            <button 
+              onClick={handleTopWalletClick}
+              className="w-8 h-8 bg-zinc-900 dark:bg-white rounded-lg flex items-center justify-center text-white dark:text-zinc-900 hover:scale-105 active:scale-95 transition-transform shadow-sm"
+              title="Click to see balance"
+            >
+              <WalletIcon size={20} />
+            </button>
+            <div className="flex flex-col">
+              <span className="font-bold text-xl tracking-tight hidden sm:block leading-none">Expensy</span>
+              <AnimatePresence>
+                {showTopBalance && topBalance !== null && (
+                  <motion.span 
+                    initial={{ opacity: 0, y: -5 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -5 }}
+                    className="text-[10px] font-bold text-emerald-500 dark:text-emerald-400 leading-none mt-1"
+                  >
+                    {formatCurrency(topBalance, currency, lang)}
+                  </motion.span>
+                )}
+              </AnimatePresence>
             </div>
-            <span className="font-bold text-xl tracking-tight hidden sm:block">Expensy</span>
           </div>
         </div>
 
@@ -94,31 +154,54 @@ export default function App() {
       </header>
 
       {/* Sidebar - Desktop */}
-      <aside className="fixed left-0 top-16 bottom-0 w-64 bg-white dark:bg-zinc-900 border-r border-zinc-200 dark:border-zinc-800 hidden lg:flex flex-col z-40">
-        <nav className="flex-1 px-4 py-6 space-y-1">
+      <aside 
+        className={`fixed left-0 top-16 bottom-0 bg-white dark:bg-zinc-900 border-r border-zinc-200 dark:border-zinc-800 hidden lg:flex flex-col z-40 transition-all duration-300 ${
+          isSidebarCollapsed ? 'w-20' : 'w-64'
+        }`}
+      >
+        <nav className="flex-1 px-3 py-6 space-y-1 overflow-y-auto scrollbar-hide">
           {navItems.map((item) => (
             <button
               key={item.id}
               onClick={() => setCurrentView(item.id as View)}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${
+              title={isSidebarCollapsed ? item.label : ''}
+              className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-medium transition-all group ${
                 currentView === item.id 
                   ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 shadow-lg shadow-zinc-900/10' 
                   : 'text-muted-foreground hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-white'
-              }`}
+              } ${isSidebarCollapsed ? 'justify-center' : ''}`}
             >
-              <item.icon size={20} />
-              {item.label}
+              <item.icon size={20} className="shrink-0" />
+              {!isSidebarCollapsed && (
+                <motion.span
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  className="truncate"
+                >
+                  {item.label}
+                </motion.span>
+              )}
             </button>
           ))}
         </nav>
 
-        <div className="p-4 border-t border-zinc-200 dark:border-zinc-800 space-y-2">
+        <div className="p-3 border-t border-zinc-200 dark:border-zinc-800 space-y-2">
           <button 
             onClick={logout}
-            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-muted-foreground hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-900/20 transition-all"
+            title={isSidebarCollapsed ? t('logout', lang) : ''}
+            className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-medium text-muted-foreground hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-900/20 transition-all ${
+              isSidebarCollapsed ? 'justify-center' : ''
+            }`}
           >
-            <LogOut size={20} />
-            {t('logout', lang)}
+            <LogOut size={20} className="shrink-0" />
+            {!isSidebarCollapsed && <span>{t('logout', lang)}</span>}
+          </button>
+          
+          <button
+            onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+            className="w-full flex items-center justify-center p-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400 transition-colors"
+          >
+            {isSidebarCollapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
           </button>
         </div>
       </aside>
@@ -132,16 +215,26 @@ export default function App() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setIsMobileMenuOpen(false)}
-              className="fixed inset-0 bg-black/20 backdrop-blur-sm z-40 lg:hidden"
+              className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[60] lg:hidden"
             />
             <motion.div
-              initial={{ x: -280 }}
+              initial={{ x: '-100%' }}
               animate={{ x: 0 }}
-              exit={{ x: -280 }}
+              exit={{ x: '-100%' }}
               transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-              className="fixed left-0 top-16 bottom-0 w-[280px] bg-white dark:bg-zinc-900 z-50 lg:hidden border-r border-zinc-200 dark:border-zinc-800 flex flex-col"
+              className="fixed left-0 top-0 bottom-0 w-[280px] bg-white dark:bg-zinc-900 z-[70] lg:hidden border-r border-zinc-200 dark:border-zinc-800 flex flex-col shadow-2xl"
             >
-              <nav className="flex-1 px-4 py-6 space-y-2">
+              <div className="h-16 flex items-center justify-between px-6 border-b border-zinc-200 dark:border-zinc-800">
+                <span className="font-bold text-xl tracking-tight">Expensy</span>
+                <button 
+                  onClick={() => setIsMobileMenuOpen(false)}
+                  className="p-2 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+              
+              <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto">
                 {navItems.map((item) => (
                   <button
                     key={item.id}
@@ -149,23 +242,24 @@ export default function App() {
                       setCurrentView(item.id as View);
                       setIsMobileMenuOpen(false);
                     }}
-                    className={`w-full flex items-center gap-3 px-4 py-4 rounded-2xl text-lg font-medium transition-all ${
+                    className={`w-full flex items-center gap-4 px-4 py-4 rounded-2xl text-base font-medium transition-all ${
                       currentView === item.id 
-                        ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900' 
+                        ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 shadow-lg' 
                         : 'text-muted-foreground hover:bg-zinc-100 dark:hover:bg-zinc-800'
                     }`}
                   >
-                    <item.icon size={24} />
+                    <item.icon size={22} />
                     {item.label}
                   </button>
                 ))}
               </nav>
-              <div className="p-4 border-t border-zinc-200 dark:border-zinc-800 space-y-2">
+              
+              <div className="p-4 border-t border-zinc-200 dark:border-zinc-800">
                 <button 
                   onClick={logout}
-                  className="w-full flex items-center gap-3 px-4 py-4 rounded-2xl text-lg font-medium text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/10 transition-all"
+                  className="w-full flex items-center gap-4 px-4 py-4 rounded-2xl text-base font-medium text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/10 transition-all"
                 >
-                  <LogOut size={24} />
+                  <LogOut size={22} />
                   {t('logout', lang)}
                 </button>
               </div>
@@ -175,7 +269,11 @@ export default function App() {
       </AnimatePresence>
 
       {/* Main Content */}
-      <main className="lg:ml-64 pt-16 min-h-screen">
+      <main 
+        className={`transition-all duration-300 pt-16 min-h-screen ${
+          isSidebarCollapsed ? 'lg:ml-20' : 'lg:ml-64'
+        }`}
+      >
         <div className="p-4 lg:p-8 max-w-6xl mx-auto">
           <AnimatePresence mode="wait">
             <motion.div
@@ -193,29 +291,11 @@ export default function App() {
               {currentView === 'profile' && <Profile />}
               {currentView === 'activity' && <UserActivity />}
               {currentView === 'reports' && <Reports />}
+              {currentView === 'budgets' && <BudgetManagement />}
             </motion.div>
           </AnimatePresence>
         </div>
       </main>
     </div>
-  );
-}
-
-function Wallet({ size }: { size: number }) {
-  return (
-    <svg 
-      width={size} 
-      height={size} 
-      viewBox="0 0 24 24" 
-      fill="none" 
-      stroke="currentColor" 
-      strokeWidth="2" 
-      strokeLinecap="round" 
-      strokeLinejoin="round"
-    >
-      <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4" />
-      <path d="M3 5v14a2 2 0 0 0 2 2h16v-5" />
-      <path d="M18 12a2 2 0 0 0 0 4h4v-4Z" />
-    </svg>
   );
 }

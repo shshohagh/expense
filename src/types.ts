@@ -36,3 +36,13 @@ export interface AuthState {
   isAuthenticated: boolean;
   isLoading: boolean;
 }
+
+export interface Budget {
+  id: number;
+  userId: number;
+  categoryId: number;
+  categoryName?: string;
+  amount: number;
+  period: 'MONTHLY' | 'YEARLY';
+  created_at: string;
+}

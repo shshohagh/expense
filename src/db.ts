@@ -73,6 +73,18 @@ db.exec(`
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (userId) REFERENCES users(id)
   );
+
+  CREATE TABLE IF NOT EXISTS budgets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    userId INTEGER NOT NULL,
+    categoryId INTEGER NOT NULL,
+    amount REAL NOT NULL,
+    period TEXT CHECK(period IN ('MONTHLY', 'YEARLY')) DEFAULT 'MONTHLY',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (userId) REFERENCES users(id),
+    FOREIGN KEY (categoryId) REFERENCES categories(id),
+    UNIQUE(userId, categoryId, period)
+  );
 `);
 
 // Migrations: Add userEmail to user_activity if it doesn't exist
