@@ -52,6 +52,14 @@ async function startServer() {
     };
   };
 
+  const logActivity = (userId: number, userEmail: string | null, action: string, details?: string) => {
+    try {
+      db.prepare("INSERT INTO user_activity (userId, userEmail, action, details) VALUES (?, ?, ?, ?)").run(userId, userEmail, action, details || null);
+    } catch (err) {
+      console.error("Failed to log activity:", err);
+    }
+  };
+
   // --- API Routes ---
 
   // Auth
@@ -89,6 +97,8 @@ async function startServer() {
     const rolePerms = db.prepare("SELECT permissions FROM role_permissions WHERE role = ?").get(user.role) as any;
     const permissions = rolePerms ? JSON.parse(rolePerms.permissions) : [];
 
+    logActivity(user.id, user.email, 'LOGIN', 'User logged in');
+
     res.json({ 
       token, 
       user: { 
@@ -101,6 +111,15 @@ async function startServer() {
         permissions
       } 
     });
+  });
+
+  app.post("/api/auth/forgot-password", (req, res) => {
+    const { email } = req.body;
+    const user = db.prepare("SELECT id FROM users WHERE email = ?").get(email);
+    
+    // In a real app, you'd generate a token and send an email here.
+    // For this demo, we'll just simulate success to avoid email enumeration.
+    res.json({ message: "If an account exists with that email, you will receive a reset link shortly." });
   });
 
   // User Profile
@@ -123,16 +142,38 @@ async function startServer() {
       } else {
         db.prepare("UPDATE users SET name = ?, currency = ?, language = ? WHERE id = ?").run(name, currency, language, req.user.id);
       }
+      logActivity(req.user.id, req.user.email, 'UPDATE_PROFILE', 'Updated profile information');
       res.json({ message: "Profile updated" });
     } catch (error: any) {
       res.status(400).json({ error: error.message });
     }
   });
 
+  app.get("/api/user/activity", authenticateToken, (req: any, res) => {
+    const activities = db.prepare(`
+      SELECT userEmail, action, details, created_at 
+      FROM user_activity 
+      WHERE userId = ? 
+      ORDER BY created_at DESC 
+      LIMIT 50
+    `).all(req.user.id);
+    res.json(activities);
+  });
+
   // Admin
   app.get("/api/admin/users", authenticateToken, hasPermission('manage_users'), (req, res) => {
     const users = db.prepare("SELECT id, email, name, role, status, created_at FROM users").all();
     res.json(users);
+  });
+
+  app.get("/api/admin/activity", authenticateToken, hasPermission('view_admin_panel'), (req, res) => {
+    const activities = db.prepare(`
+      SELECT userEmail, action, details, created_at 
+      FROM user_activity 
+      ORDER BY created_at DESC 
+      LIMIT 100
+    `).all();
+    res.json(activities);
   });
 
   app.post("/api/admin/users", authenticateToken, hasPermission('manage_users'), async (req, res) => {
@@ -235,6 +276,7 @@ async function startServer() {
     const { type, amount, categoryId, frequency, startDate, description } = req.body;
     const stmt = db.prepare("INSERT INTO recurring_transactions (userId, type, amount, categoryId, frequency, startDate, nextDate, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
     const result = stmt.run(req.user.id, type, amount, categoryId, frequency, startDate, startDate, description);
+    logActivity(req.user.id, req.user.email, 'ADD_RECURRING', `Added recurring ${type.toLowerCase()} of ${amount}`);
     res.status(201).json({ id: result.lastInsertRowid });
   });
 
@@ -247,6 +289,7 @@ async function startServer() {
     try {
       const stmt = db.prepare("UPDATE recurring_transactions SET type = ?, amount = ?, categoryId = ?, frequency = ?, startDate = ?, nextDate = ?, description = ?, active = ? WHERE id = ? AND userId = ?");
       stmt.run(type, amount, categoryId, frequency, startDate, finalNextDate, description, active ? 1 : 0, req.params.id, req.user.id);
+      logActivity(req.user.id, req.user.email, 'UPDATE_RECURRING', `Updated recurring transaction #${req.params.id}`);
       res.json({ message: "Recurring transaction updated" });
     } catch (error: any) {
       res.status(400).json({ error: error.message });
@@ -255,6 +298,7 @@ async function startServer() {
 
   app.delete("/api/recurring-transactions/:id", authenticateToken, (req: any, res) => {
     db.prepare("DELETE FROM recurring_transactions WHERE id = ? AND userId = ?").run(req.params.id, req.user.id);
+    logActivity(req.user.id, req.user.email, 'DELETE_RECURRING', `Deleted recurring transaction #${req.params.id}`);
     res.json({ message: "Recurring transaction deleted" });
   });
 
@@ -263,6 +307,7 @@ async function startServer() {
     const { type, amount, categoryId, date, description, status } = req.body;
     const stmt = db.prepare("INSERT INTO transactions (userId, type, amount, categoryId, date, description, status) VALUES (?, ?, ?, ?, ?, ?, ?)");
     const result = stmt.run(req.user.id, type, amount, categoryId, date, description, status || 'ACTIVE');
+    logActivity(req.user.id, req.user.email, 'ADD_TRANSACTION', `Added ${type.toLowerCase()} of ${amount}`);
     res.status(201).json({ id: result.lastInsertRowid });
   });
 
@@ -270,11 +315,13 @@ async function startServer() {
     const { type, amount, categoryId, date, description, status } = req.body;
     const stmt = db.prepare("UPDATE transactions SET type = ?, amount = ?, categoryId = ?, date = ?, description = ?, status = ? WHERE id = ? AND userId = ?");
     stmt.run(type, amount, categoryId, date, description, status, req.params.id, req.user.id);
+    logActivity(req.user.id, req.user.email, 'UPDATE_TRANSACTION', `Updated transaction #${req.params.id}`);
     res.json({ message: "Transaction updated" });
   });
 
   app.delete("/api/transactions/:id", authenticateToken, (req: any, res) => {
     db.prepare("DELETE FROM transactions WHERE id = ? AND userId = ?").run(req.params.id, req.user.id);
+    logActivity(req.user.id, req.user.email, 'DELETE_TRANSACTION', `Deleted transaction #${req.params.id}`);
     res.json({ message: "Transaction deleted" });
   });
 
@@ -289,6 +336,7 @@ async function startServer() {
     try {
       const stmt = db.prepare("INSERT INTO categories (userId, name, type) VALUES (?, ?, ?)");
       stmt.run(req.user.id, name, type);
+      logActivity(req.user.id, req.user.email, 'ADD_CATEGORY', `Added category: ${name} (${type})`);
       res.status(201).json({ message: "Category created" });
     } catch (error: any) {
       res.status(400).json({ error: error.message });
@@ -309,6 +357,7 @@ async function startServer() {
   app.delete("/api/categories/:id", authenticateToken, (req: any, res) => {
     try {
       db.prepare("DELETE FROM categories WHERE id = ? AND (userId = ? OR ? = 'SUPER_ADMIN')").run(req.params.id, req.user.id, req.user.role);
+      logActivity(req.user.id, req.user.email, 'DELETE_CATEGORY', `Deleted category #${req.params.id}`);
       res.json({ message: "Category deleted" });
     } catch (error: any) {
       res.status(400).json({ error: error.message });

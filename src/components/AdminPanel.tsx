@@ -20,7 +20,8 @@ export default function AdminPanel() {
   const { token, user: currentUser } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
   const [rolePermissions, setRolePermissions] = useState<RolePermission[]>([]);
-  const [activeTab, setActiveTab] = useState<'users' | 'permissions'>('users');
+  const [activities, setActivities] = useState<any[]>([]);
+  const [activeTab, setActiveTab] = useState<'users' | 'permissions' | 'activity'>('users');
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -36,7 +37,21 @@ export default function AdminPanel() {
   useEffect(() => {
     fetchUsers();
     fetchRolePermissions();
+    fetchActivities();
   }, []);
+
+  const fetchActivities = async () => {
+    try {
+      const res = await fetch('/api/admin/activity', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        setActivities(await res.json());
+      }
+    } catch (error) {
+      console.error(error);
+    }
+  };
 
   const fetchUsers = async () => {
     try {
@@ -196,6 +211,16 @@ export default function AdminPanel() {
           >
             Role Permissions
           </button>
+          <button
+            onClick={() => setActiveTab('activity')}
+            className={`px-6 py-2 rounded-xl text-sm font-semibold transition-all ${
+              activeTab === 'activity' 
+                ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white shadow-sm' 
+                : 'text-muted-foreground hover:text-zinc-900 dark:hover:text-white'
+            }`}
+          >
+            System Activity
+          </button>
         </div>
       </header>
 
@@ -271,7 +296,7 @@ export default function AdminPanel() {
             </table>
           </div>
         </div>
-      ) : (
+      ) : activeTab === 'permissions' ? (
         <div className="space-y-6">
           <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-4 rounded-2xl flex gap-3">
             <AlertCircle className="text-amber-600 shrink-0" size={20} />
@@ -319,6 +344,37 @@ export default function AdminPanel() {
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      ) : (
+        <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden shadow-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-bottom border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-800/50">
+                  <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground">User</th>
+                  <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Action</th>
+                  <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Details</th>
+                  <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Date</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
+                {activities.map((a, i) => (
+                  <tr key={i} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-800/50 transition-colors">
+                    <td className="px-6 py-4 text-sm">{a.userEmail}</td>
+                    <td className="px-6 py-4">
+                      <span className="px-2 py-1 bg-zinc-100 dark:bg-zinc-800 rounded text-[10px] font-bold uppercase tracking-wider">
+                        {a.action}
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-sm text-muted-foreground">{a.details}</td>
+                    <td className="px-6 py-4 text-xs text-muted-foreground">
+                      {new Date(a.created_at).toLocaleString()}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       )}

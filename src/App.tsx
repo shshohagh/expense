@@ -7,6 +7,7 @@ import AdminPanel from './components/AdminPanel';
 import CategoryManagement from './components/CategoryManagement';
 import RecurringTransactions from './components/RecurringTransactions';
 import Profile from './components/Profile';
+import UserActivity from './components/UserActivity';
 import { t } from './utils/i18n';
 import { 
   LayoutDashboard, 
@@ -16,19 +17,18 @@ import {
   LogOut, 
   Menu, 
   X,
-  Cloud,
   Tags,
-  Repeat
+  Repeat,
+  History
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
-type View = 'dashboard' | 'transactions' | 'admin' | 'profile' | 'categories' | 'recurring';
+type View = 'dashboard' | 'transactions' | 'admin' | 'profile' | 'categories' | 'recurring' | 'activity';
 
 export default function App() {
   const { isAuthenticated, isLoading, user, logout, token } = useAuth();
   const [currentView, setCurrentView] = useState<View>('dashboard');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [syncing, setSyncing] = useState(false);
 
   const lang = user?.language || 'en';
 
@@ -48,6 +48,7 @@ export default function App() {
     { id: 'dashboard', label: t('dashboard', lang), icon: LayoutDashboard },
     { id: 'transactions', label: t('transactions', lang), icon: Receipt },
     { id: 'recurring', label: t('recurring', lang), icon: Repeat },
+    { id: 'activity', label: 'Activity', icon: History },
     ...(user?.permissions?.includes('manage_categories') || user?.role === 'SUPER_ADMIN' ? [
       { id: 'categories', label: t('categories', lang), icon: Tags }
     ] : []),
@@ -56,37 +57,6 @@ export default function App() {
     ] : []),
     { id: 'profile', label: t('profile', lang), icon: UserCircle },
   ];
-
-  const handleSync = async () => {
-    setSyncing(true);
-    try {
-      const res = await fetch('/api/auth/google/url', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      const { url } = await res.json();
-      
-      const authWindow = window.open(url, 'google_oauth', 'width=600,height=700');
-      
-      const handleMessage = (event: MessageEvent) => {
-        if (event.data?.type === 'OAUTH_AUTH_SUCCESS') {
-          alert('Google Drive connected! Syncing database...');
-          // In a real app, you'd trigger the actual upload here
-          fetch('/api/sync/google-drive', {
-            method: 'POST',
-            headers: { Authorization: `Bearer ${token}` }
-          }).then(r => r.json()).then(data => {
-            alert(data.message || 'Sync complete!');
-          });
-        }
-      };
-      
-      window.addEventListener('message', handleMessage);
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setSyncing(false);
-    }
-  };
 
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-black text-zinc-900 dark:text-zinc-100">
@@ -141,14 +111,6 @@ export default function App() {
 
         <div className="p-4 border-t border-zinc-200 dark:border-zinc-800 space-y-2">
           <button 
-            onClick={handleSync}
-            disabled={syncing}
-            className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-muted-foreground hover:bg-emerald-50 hover:text-emerald-600 dark:hover:bg-emerald-900/20 transition-all disabled:opacity-50"
-          >
-            <Cloud size={20} />
-            {syncing ? 'Syncing...' : 'Cloud Backup'}
-          </button>
-          <button 
             onClick={logout}
             className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-muted-foreground hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-900/20 transition-all"
           >
@@ -197,13 +159,6 @@ export default function App() {
               </nav>
               <div className="p-4 border-t border-zinc-200 dark:border-zinc-800 space-y-2">
                 <button 
-                  onClick={handleSync}
-                  className="w-full flex items-center gap-3 px-4 py-4 rounded-2xl text-lg font-medium text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/10 transition-all"
-                >
-                  <Cloud size={24} />
-                  Cloud Backup
-                </button>
-                <button 
                   onClick={logout}
                   className="w-full flex items-center gap-3 px-4 py-4 rounded-2xl text-lg font-medium text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/10 transition-all"
                 >
@@ -233,6 +188,7 @@ export default function App() {
               {currentView === 'categories' && <CategoryManagement />}
               {currentView === 'admin' && <AdminPanel />}
               {currentView === 'profile' && <Profile />}
+              {currentView === 'activity' && <UserActivity />}
             </motion.div>
           </AnimatePresence>
         </div>

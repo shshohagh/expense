@@ -63,7 +63,24 @@ db.exec(`
     role TEXT PRIMARY KEY,
     permissions TEXT NOT NULL -- JSON array of permission strings
   );
+
+  CREATE TABLE IF NOT EXISTS user_activity (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    userId INTEGER NOT NULL,
+    userEmail TEXT,
+    action TEXT NOT NULL,
+    details TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (userId) REFERENCES users(id)
+  );
 `);
+
+// Migrations: Add userEmail to user_activity if it doesn't exist
+const activityTableInfo = db.prepare("PRAGMA table_info(user_activity)").all() as any[];
+const activityColumns = activityTableInfo.map(c => c.name);
+if (!activityColumns.includes('userEmail')) {
+  db.exec("ALTER TABLE user_activity ADD COLUMN userEmail TEXT");
+}
 
 // Migrations: Add currency and language columns if they don't exist
 const tableInfo = db.prepare("PRAGMA table_info(users)").all() as any[];
