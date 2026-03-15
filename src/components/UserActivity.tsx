@@ -5,6 +5,7 @@ import { History, Clock, Activity, AlertCircle } from 'lucide-react';
 
 interface ActivityLog {
   userEmail: string;
+  userName: string;
   action: string;
   details: string;
   created_at: string;
@@ -99,9 +100,14 @@ export default function UserActivity() {
                   <div className="flex items-center justify-between gap-4">
                     <div className="flex items-center gap-2">
                       <p className="font-semibold">{formatAction(activity.action)}</p>
-                      <span className="text-[10px] text-muted-foreground bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded uppercase font-medium">
-                        {activity.userEmail}
-                      </span>
+                      <div className="flex flex-col">
+                        <span className="text-[10px] font-bold text-zinc-900 dark:text-zinc-100">
+                          {activity.userName}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground uppercase font-medium">
+                          {activity.userEmail}
+                        </span>
+                      </div>
                     </div>
                     <div className="flex items-center gap-1.5 text-xs text-muted-foreground shrink-0">
                       <Clock size={12} />

@@ -151,10 +151,11 @@ async function startServer() {
 
   app.get("/api/user/activity", authenticateToken, (req: any, res) => {
     const activities = db.prepare(`
-      SELECT userEmail, action, details, created_at 
-      FROM user_activity 
-      WHERE userId = ? 
-      ORDER BY created_at DESC 
+      SELECT ua.userEmail, u.name as userName, ua.action, ua.details, ua.created_at 
+      FROM user_activity ua
+      LEFT JOIN users u ON ua.userId = u.id
+      WHERE ua.userId = ? 
+      ORDER BY ua.created_at DESC 
       LIMIT 50
     `).all(req.user.id);
     res.json(activities);
@@ -168,9 +169,10 @@ async function startServer() {
 
   app.get("/api/admin/activity", authenticateToken, hasPermission('view_admin_panel'), (req, res) => {
     const activities = db.prepare(`
-      SELECT userEmail, action, details, created_at 
-      FROM user_activity 
-      ORDER BY created_at DESC 
+      SELECT ua.userEmail, u.name as userName, ua.action, ua.details, ua.created_at 
+      FROM user_activity ua
+      LEFT JOIN users u ON ua.userId = u.id
+      ORDER BY ua.created_at DESC 
       LIMIT 100
     `).all();
     res.json(activities);

@@ -361,7 +361,12 @@ export default function AdminPanel() {
               <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
                 {activities.map((a, i) => (
                   <tr key={i} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-800/50 transition-colors">
-                    <td className="px-6 py-4 text-sm">{a.userEmail}</td>
+                    <td className="px-6 py-4">
+                      <div className="flex flex-col">
+                        <span className="text-sm font-medium">{a.userName}</span>
+                        <span className="text-xs text-muted-foreground">{a.userEmail}</span>
+                      </div>
+                    </td>
                     <td className="px-6 py-4">
                       <span className="px-2 py-1 bg-zinc-100 dark:bg-zinc-800 rounded text-[10px] font-bold uppercase tracking-wider">
                         {a.action}
