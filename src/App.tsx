@@ -8,6 +8,7 @@ import CategoryManagement from './components/CategoryManagement';
 import RecurringTransactions from './components/RecurringTransactions';
 import Profile from './components/Profile';
 import UserActivity from './components/UserActivity';
+import Reports from './components/Reports';
 import { t } from './utils/i18n';
 import { 
   LayoutDashboard, 
@@ -19,11 +20,12 @@ import {
   X,
   Tags,
   Repeat,
-  History
+  History,
+  FileText
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
-type View = 'dashboard' | 'transactions' | 'admin' | 'profile' | 'categories' | 'recurring' | 'activity';
+type View = 'dashboard' | 'transactions' | 'admin' | 'profile' | 'categories' | 'recurring' | 'activity' | 'reports';
 
 export default function App() {
   const { isAuthenticated, isLoading, user, logout, token } = useAuth();
@@ -47,6 +49,7 @@ export default function App() {
   const navItems = [
     { id: 'dashboard', label: t('dashboard', lang), icon: LayoutDashboard },
     { id: 'transactions', label: t('transactions', lang), icon: Receipt },
+    { id: 'reports', label: t('reports', lang), icon: FileText },
     { id: 'recurring', label: t('recurring', lang), icon: Repeat },
     { id: 'activity', label: 'Activity', icon: History },
     ...(user?.permissions?.includes('manage_categories') || user?.role === 'SUPER_ADMIN' ? [
@@ -189,6 +192,7 @@ export default function App() {
               {currentView === 'admin' && <AdminPanel />}
               {currentView === 'profile' && <Profile />}
               {currentView === 'activity' && <UserActivity />}
+              {currentView === 'reports' && <Reports />}
             </motion.div>
           </AnimatePresence>
         </div>
