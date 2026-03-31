@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { Budget, Category, Transaction } from '../types';
 import { formatCurrency, t } from '../utils/i18n';
-import { Plus, Pencil, Trash2, AlertCircle, CheckCircle2, TrendingUp } from 'lucide-react';
+import { Plus, Pencil, Trash2, AlertCircle, CheckCircle2, TrendingUp, Download } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 export default function BudgetManagement() {
@@ -94,6 +94,23 @@ export default function BudgetManagement() {
     }
   };
 
+  const handleExport = (format: 'csv' | 'xlsx' | 'json') => {
+    fetch(`/api/budgets/export/${format}`, {
+      headers: { Authorization: `Bearer ${token}` }
+    })
+    .then(res => res.blob())
+    .then(blob => {
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `budgets.${format}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    });
+  };
+
   const calculateSpent = (categoryId: number, period: 'MONTHLY' | 'YEARLY') => {
     const now = new Date();
     return transactions
@@ -123,17 +140,40 @@ export default function BudgetManagement() {
           <h1 className="text-3xl font-bold tracking-tight">{t('budgets', lang)}</h1>
           <p className="text-muted-foreground">Manage your spending limits by category.</p>
         </div>
-        <button
-          onClick={() => {
-            setEditingBudget(null);
-            setFormData({ categoryId: '', amount: '', period: 'MONTHLY' });
-            setShowModal(true);
-          }}
-          className="flex items-center gap-2 px-4 py-2 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-xl text-sm font-medium hover:opacity-90 transition-opacity shadow-sm"
-        >
-          <Plus size={18} />
-          Add Budget
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => handleExport('csv')}
+            className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-sm font-medium hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors shadow-sm"
+          >
+            <Download size={18} />
+            CSV
+          </button>
+          <button
+            onClick={() => handleExport('xlsx')}
+            className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-sm font-medium hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors shadow-sm"
+          >
+            <Download size={18} />
+            Excel
+          </button>
+          <button
+            onClick={() => handleExport('json')}
+            className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-sm font-medium hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors shadow-sm"
+          >
+            <Download size={18} />
+            JSON
+          </button>
+          <button
+            onClick={() => {
+              setEditingBudget(null);
+              setFormData({ categoryId: '', amount: '', period: 'MONTHLY' });
+              setShowModal(true);
+            }}
+            className="flex items-center gap-2 px-4 py-2 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-xl text-sm font-medium hover:opacity-90 transition-opacity shadow-sm"
+          >
+            <Plus size={18} />
+            Add Budget
+          </button>
+        </div>
       </header>
 
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">

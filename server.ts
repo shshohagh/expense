@@ -372,6 +372,38 @@ async function startServer() {
     }
   });
 
+  app.get("/api/budgets/export/:format", authenticateToken, (req: any, res) => {
+    try {
+      const budgets = db.prepare(`
+        SELECT c.name as Category, b.amount as Amount, b.period as Period
+        FROM budgets b 
+        JOIN categories c ON b.categoryId = c.id 
+        WHERE b.userId = ?
+      `).all(req.user.id);
+      
+      const format = req.params.format;
+      
+      if (format === 'csv' || format === 'xlsx') {
+        const ws = xlsx.utils.json_to_sheet(budgets);
+        const wb = xlsx.utils.book_new();
+        xlsx.utils.book_append_sheet(wb, ws, "Budgets");
+        
+        const buf = xlsx.write(wb, { type: 'buffer', bookType: format as any });
+        res.setHeader('Content-Disposition', `attachment; filename="budgets.${format}"`);
+        res.setHeader('Content-Type', format === 'csv' ? 'text/csv' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        return res.send(buf);
+      } else if (format === 'json') {
+        res.setHeader('Content-Disposition', `attachment; filename="budgets.json"`);
+        res.setHeader('Content-Type', 'application/json');
+        return res.send(JSON.stringify(budgets, null, 2));
+      } else {
+        return res.status(400).json({ error: "Invalid format" });
+      }
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Categories
   app.get("/api/categories", authenticateToken, (req: any, res) => {
     const categories = db.prepare("SELECT * FROM categories WHERE userId IS NULL OR userId = ?").all(req.user.id);
