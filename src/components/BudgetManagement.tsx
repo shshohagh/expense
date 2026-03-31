@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { Budget, Category, Transaction } from '../types';
 import { formatCurrency, t } from '../utils/i18n';
-import { Plus, Pencil, Trash2, AlertCircle, CheckCircle2, TrendingUp, Download } from 'lucide-react';
+import { Plus, Pencil, Trash2, AlertCircle, CheckCircle2, TrendingUp, Download, Filter } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 export default function BudgetManagement() {
@@ -13,6 +13,8 @@ export default function BudgetManagement() {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editingBudget, setEditingBudget] = useState<Budget | null>(null);
+  const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const [periodFilter, setPeriodFilter] = useState<string>('all');
   const [formData, setFormData] = useState({
     categoryId: '',
     amount: '',
@@ -131,6 +133,12 @@ export default function BudgetManagement() {
       .reduce((acc, t) => acc + t.amount, 0);
   };
 
+  const filteredBudgets = budgets.filter(budget => {
+    const matchesCategory = categoryFilter === 'all' || budget.categoryId.toString() === categoryFilter;
+    const matchesPeriod = periodFilter === 'all' || budget.period === periodFilter;
+    return matchesCategory && matchesPeriod;
+  });
+
   if (loading) return <div className="p-8 text-center">Loading budgets...</div>;
 
   return (
@@ -176,8 +184,33 @@ export default function BudgetManagement() {
         </div>
       </header>
 
+      <div className="flex flex-wrap items-center gap-3 p-4 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
+        <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground mr-2">
+          <Filter size={16} /> Filter:
+        </div>
+        <select
+          value={categoryFilter}
+          onChange={(e) => setCategoryFilter(e.target.value)}
+          className="px-3 py-1.5 text-sm bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-800 rounded-lg focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100"
+        >
+          <option value="all">All Categories</option>
+          {categories.map(cat => (
+            <option key={cat.id} value={cat.id}>{cat.name}</option>
+          ))}
+        </select>
+        <select
+          value={periodFilter}
+          onChange={(e) => setPeriodFilter(e.target.value)}
+          className="px-3 py-1.5 text-sm bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-800 rounded-lg focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100"
+        >
+          <option value="all">All Periods</option>
+          <option value="MONTHLY">Monthly</option>
+          <option value="YEARLY">Yearly</option>
+        </select>
+      </div>
+
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-        {budgets.map((budget) => {
+        {filteredBudgets.map((budget) => {
           const spent = calculateSpent(budget.categoryId, budget.period);
           const percent = Math.min((spent / budget.amount) * 100, 100);
           const isOver = spent > budget.amount;
