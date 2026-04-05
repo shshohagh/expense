@@ -12,6 +12,8 @@ export default function BudgetManagement() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [budgetToDelete, setBudgetToDelete] = useState<number | null>(null);
   const [editingBudget, setEditingBudget] = useState<Budget | null>(null);
   const [activeType, setActiveType] = useState<'EXPENSE' | 'INCOME'>('EXPENSE');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
@@ -85,13 +87,22 @@ export default function BudgetManagement() {
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm('Are you sure you want to delete this budget?')) return;
+    setBudgetToDelete(id);
+    setShowDeleteConfirm(true);
+  };
+
+  const confirmDelete = async () => {
+    if (!budgetToDelete) return;
     try {
-      const res = await fetch(`/api/budgets/${id}`, {
+      const res = await fetch(`/api/budgets/${budgetToDelete}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` }
       });
-      if (res.ok) fetchData();
+      if (res.ok) {
+        fetchData();
+        setShowDeleteConfirm(false);
+        setBudgetToDelete(null);
+      }
     } catch (error) {
       console.error(error);
     }
@@ -423,6 +434,41 @@ export default function BudgetManagement() {
                   </button>
                 </div>
               </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showDeleteConfirm && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-white dark:bg-zinc-900 rounded-3xl p-8 w-full max-w-sm shadow-2xl border border-zinc-200 dark:border-zinc-800 text-center"
+            >
+              <div className="w-16 h-16 bg-rose-100 dark:bg-rose-900/30 text-rose-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                <AlertCircle size={32} />
+              </div>
+              <h2 className="text-xl font-bold mb-2">Delete Budget?</h2>
+              <p className="text-muted-foreground mb-6">
+                This action cannot be undone. Are you sure you want to remove this budget?
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowDeleteConfirm(false)}
+                  className="flex-1 px-4 py-3 rounded-xl border border-zinc-200 dark:border-zinc-800 font-medium hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmDelete}
+                  className="flex-1 px-4 py-3 rounded-xl bg-rose-600 text-white font-medium hover:bg-rose-700 transition-all shadow-lg shadow-rose-600/20"
+                >
+                  Delete
+                </button>
+              </div>
             </motion.div>
           </div>
         )}
