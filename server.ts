@@ -330,7 +330,7 @@ async function startServer() {
   // Budgets
   app.get("/api/budgets", authenticateToken, (req: any, res) => {
     const budgets = db.prepare(`
-      SELECT b.*, c.name as categoryName 
+      SELECT b.*, c.name as categoryName, c.type as categoryType
       FROM budgets b 
       JOIN categories c ON b.categoryId = c.id 
       WHERE b.userId = ?
@@ -375,7 +375,7 @@ async function startServer() {
   app.get("/api/budgets/export/:format", authenticateToken, (req: any, res) => {
     try {
       const budgets = db.prepare(`
-        SELECT c.name as Category, b.amount as Amount, b.period as Period
+        SELECT c.name as Category, c.type as Type, b.amount as Amount, b.period as Period
         FROM budgets b 
         JOIN categories c ON b.categoryId = c.id 
         WHERE b.userId = ?

@@ -13,6 +13,7 @@ export default function BudgetManagement() {
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editingBudget, setEditingBudget] = useState<Budget | null>(null);
+  const [activeType, setActiveType] = useState<'EXPENSE' | 'INCOME'>('EXPENSE');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [periodFilter, setPeriodFilter] = useState<string>('all');
   const [formData, setFormData] = useState({
@@ -43,7 +44,7 @@ export default function BudgetManagement() {
           transactionsRes.json()
         ]);
         setBudgets(budgetsData);
-        setCategories(categoriesData.filter((c: Category) => c.type === 'EXPENSE'));
+        setCategories(categoriesData);
         setTransactions(transactionsData);
       }
     } catch (error) {
@@ -113,16 +114,16 @@ export default function BudgetManagement() {
     });
   };
 
-  const calculateSpent = (categoryId: number, period: 'MONTHLY' | 'YEARLY') => {
+  const calculateActual = (categoryId: number, period: 'MONTHLY' | 'YEARLY', type: 'INCOME' | 'EXPENSE') => {
     const now = new Date();
     return transactions
       .filter(t => {
         const tDate = new Date(t.date);
         const isSameCategory = t.categoryId === categoryId;
-        const isExpense = t.type === 'EXPENSE';
+        const isCorrectType = t.type === type;
         const isActive = t.status === 'ACTIVE' || !t.status;
         
-        if (!isSameCategory || !isExpense || !isActive) return false;
+        if (!isSameCategory || !isCorrectType || !isActive) return false;
 
         if (period === 'MONTHLY') {
           return tDate.getMonth() === now.getMonth() && tDate.getFullYear() === now.getFullYear();
@@ -134,10 +135,13 @@ export default function BudgetManagement() {
   };
 
   const filteredBudgets = budgets.filter(budget => {
+    const matchesType = budget.categoryType === activeType;
     const matchesCategory = categoryFilter === 'all' || budget.categoryId.toString() === categoryFilter;
     const matchesPeriod = periodFilter === 'all' || budget.period === periodFilter;
-    return matchesCategory && matchesPeriod;
+    return matchesType && matchesCategory && matchesPeriod;
   });
+
+  const activeCategories = categories.filter(c => c.type === activeType);
 
   if (loading) return <div className="p-8 text-center">Loading budgets...</div>;
 
@@ -184,36 +188,70 @@ export default function BudgetManagement() {
         </div>
       </header>
 
-      <div className="flex flex-wrap items-center gap-3 p-4 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
-        <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground mr-2">
-          <Filter size={16} /> Filter:
-        </div>
-        <select
-          value={categoryFilter}
-          onChange={(e) => setCategoryFilter(e.target.value)}
-          className="px-3 py-1.5 text-sm bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-800 rounded-lg focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100"
-        >
-          <option value="all">All Categories</option>
-          {categories.map(cat => (
-            <option key={cat.id} value={cat.id}>{cat.name}</option>
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+        <div className="flex p-1 bg-zinc-100 dark:bg-zinc-800 rounded-xl w-full sm:w-auto">
+          {(['EXPENSE', 'INCOME'] as const).map((type) => (
+            <button
+              key={type}
+              onClick={() => {
+                setActiveType(type);
+                setCategoryFilter('all');
+              }}
+              className={`flex-1 sm:flex-none px-6 py-2 rounded-lg text-sm font-medium transition-all ${
+                activeType === type
+                  ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white shadow-sm'
+                  : 'text-muted-foreground hover:text-zinc-900 dark:hover:text-white'
+              }`}
+            >
+              {type === 'EXPENSE' ? 'Expenses' : 'Income'}
+            </button>
           ))}
-        </select>
-        <select
-          value={periodFilter}
-          onChange={(e) => setPeriodFilter(e.target.value)}
-          className="px-3 py-1.5 text-sm bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-800 rounded-lg focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100"
-        >
-          <option value="all">All Periods</option>
-          <option value="MONTHLY">Monthly</option>
-          <option value="YEARLY">Yearly</option>
-        </select>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3 p-2 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm w-full sm:w-auto">
+          <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground px-2">
+            <Filter size={16} /> Filter:
+          </div>
+          <select
+            value={categoryFilter}
+            onChange={(e) => setCategoryFilter(e.target.value)}
+            className="px-3 py-1.5 text-sm bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-800 rounded-lg focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100"
+          >
+            <option value="all">All Categories</option>
+            {activeCategories.map(cat => (
+              <option key={cat.id} value={cat.id}>{cat.name}</option>
+            ))}
+          </select>
+          <select
+            value={periodFilter}
+            onChange={(e) => setPeriodFilter(e.target.value)}
+            className="px-3 py-1.5 text-sm bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-800 rounded-lg focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100"
+          >
+            <option value="all">All Periods</option>
+            <option value="MONTHLY">Monthly</option>
+            <option value="YEARLY">Yearly</option>
+          </select>
+        </div>
       </div>
 
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
         {filteredBudgets.map((budget) => {
-          const spent = calculateSpent(budget.categoryId, budget.period);
-          const percent = Math.min((spent / budget.amount) * 100, 100);
-          const isOver = spent > budget.amount;
+          const actual = calculateActual(budget.categoryId, budget.period, budget.categoryType || 'EXPENSE');
+          const actualPercent = (actual / budget.amount) * 100;
+          const displayPercent = Math.min(actualPercent, 100);
+          const isOver = activeType === 'EXPENSE' ? actual > budget.amount : actual < budget.amount;
+          const isUnder = activeType === 'INCOME' ? actual > budget.amount : actual < budget.amount;
+
+          let barColor = 'bg-emerald-500';
+          if (activeType === 'EXPENSE') {
+            if (actualPercent > 100) barColor = 'bg-rose-500';
+            else if (actualPercent >= 80) barColor = 'bg-amber-500';
+          } else {
+            // For income, being over is good (green), being under is bad (red)
+            if (actualPercent >= 100) barColor = 'bg-emerald-500';
+            else if (actualPercent >= 80) barColor = 'bg-amber-500';
+            else barColor = 'bg-rose-500';
+          }
 
           return (
             <motion.div
@@ -253,31 +291,45 @@ export default function BudgetManagement() {
 
               <div className="space-y-2">
                 <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Spent</span>
-                  <span className={isOver ? 'text-rose-600 font-bold' : 'font-medium'}>
-                    {formatCurrency(spent, currency, lang)} / {formatCurrency(budget.amount, currency, lang)}
+                  <span className="text-muted-foreground">{activeType === 'EXPENSE' ? 'Spent' : 'Earned'}</span>
+                  <span className={isOver && activeType === 'EXPENSE' ? 'text-rose-600 font-bold' : isUnder && activeType === 'INCOME' ? 'text-emerald-600 font-bold' : 'font-medium'}>
+                    {formatCurrency(actual, currency, lang)} / {formatCurrency(budget.amount, currency, lang)}
                   </span>
                 </div>
                 <div className="h-2 bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden">
                   <motion.div
                     initial={{ width: 0 }}
-                    animate={{ width: `${percent}%` }}
-                    className={`h-full transition-all ${isOver ? 'bg-rose-500' : 'bg-emerald-500'}`}
+                    animate={{ width: `${displayPercent}%` }}
+                    className={`h-full transition-all ${barColor}`}
                   />
                 </div>
               </div>
 
               <div className="flex items-center gap-2 text-xs">
-                {isOver ? (
-                  <div className="flex items-center gap-1 text-rose-600 font-medium">
-                    <AlertCircle size={14} />
-                    Over budget by {formatCurrency(spent - budget.amount, currency, lang)}
-                  </div>
+                {activeType === 'EXPENSE' ? (
+                  isOver ? (
+                    <div className="flex items-center gap-1 text-rose-600 font-medium">
+                      <AlertCircle size={14} />
+                      Over budget by {formatCurrency(actual - budget.amount, currency, lang)}
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1 text-emerald-600 font-medium">
+                      <CheckCircle2 size={14} />
+                      {formatCurrency(budget.amount - actual, currency, lang)} remaining
+                    </div>
+                  )
                 ) : (
-                  <div className="flex items-center gap-1 text-emerald-600 font-medium">
-                    <CheckCircle2 size={14} />
-                    {formatCurrency(budget.amount - spent, currency, lang)} remaining
-                  </div>
+                  actual >= budget.amount ? (
+                    <div className="flex items-center gap-1 text-emerald-600 font-medium">
+                      <CheckCircle2 size={14} />
+                      Goal reached! {formatCurrency(actual - budget.amount, currency, lang)} extra
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1 text-amber-600 font-medium">
+                      <AlertCircle size={14} />
+                      {formatCurrency(budget.amount - actual, currency, lang)} to reach goal
+                    </div>
+                  )
                 )}
               </div>
             </motion.div>
@@ -316,7 +368,7 @@ export default function BudgetManagement() {
                     className="w-full px-4 py-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100 outline-none transition-all"
                   >
                     <option value="">Select Category</option>
-                    {categories.map((cat) => (
+                    {activeCategories.map((cat) => (
                       <option key={cat.id} value={cat.id}>{cat.name}</option>
                     ))}
                   </select>

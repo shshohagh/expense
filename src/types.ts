@@ -42,6 +42,7 @@ export interface Budget {
   userId: number;
   categoryId: number;
   categoryName?: string;
+  categoryType?: 'INCOME' | 'EXPENSE';
   amount: number;
   period: 'MONTHLY' | 'YEARLY';
   created_at: string;
