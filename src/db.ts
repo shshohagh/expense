@@ -15,7 +15,8 @@ db.exec(`
     status TEXT DEFAULT 'PENDING',
     currency TEXT DEFAULT 'USD',
     language TEXT DEFAULT 'en',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    deleted_at DATETIME
   );
 
   CREATE TABLE IF NOT EXISTS transactions (
@@ -29,6 +30,7 @@ db.exec(`
     description TEXT,
     status TEXT DEFAULT 'ACTIVE',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    deleted_at DATETIME,
     FOREIGN KEY (userId) REFERENCES users(id),
     FOREIGN KEY (categoryId) REFERENCES categories(id)
   );
@@ -46,6 +48,7 @@ db.exec(`
     description TEXT,
     active INTEGER DEFAULT 1,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    deleted_at DATETIME,
     FOREIGN KEY (userId) REFERENCES users(id),
     FOREIGN KEY (categoryId) REFERENCES categories(id)
   );
@@ -55,6 +58,7 @@ db.exec(`
     userId INTEGER, -- NULL for global/default categories
     name TEXT NOT NULL,
     type TEXT CHECK(type IN ('INCOME', 'EXPENSE')) NOT NULL,
+    deleted_at DATETIME,
     FOREIGN KEY (userId) REFERENCES users(id),
     UNIQUE(userId, name, type)
   );
@@ -81,6 +85,7 @@ db.exec(`
     amount REAL NOT NULL,
     period TEXT CHECK(period IN ('MONTHLY', 'YEARLY')) DEFAULT 'MONTHLY',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    deleted_at DATETIME,
     FOREIGN KEY (userId) REFERENCES users(id),
     FOREIGN KEY (categoryId) REFERENCES categories(id),
     UNIQUE(userId, categoryId, period)
@@ -115,6 +120,16 @@ if (!transactionColumns.includes('status')) {
 // Migration for categoryId and userId
 if (!transactionColumns.includes('categoryId')) {
   db.exec("ALTER TABLE transactions ADD COLUMN categoryId INTEGER REFERENCES categories(id)");
+}
+
+// Soft Delete Migrations
+const tablesToSoftDelete = ['users', 'transactions', 'recurring_transactions', 'categories', 'budgets'];
+for (const table of tablesToSoftDelete) {
+  const info = db.prepare(`PRAGMA table_info(${table})`).all() as any[];
+  const cols = info.map(c => c.name);
+  if (!cols.includes('deleted_at')) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN deleted_at DATETIME`);
+  }
 }
 
 const recurringTableInfo = db.prepare("PRAGMA table_info(recurring_transactions)").all() as any[];

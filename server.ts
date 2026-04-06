@@ -67,7 +67,7 @@ async function startServer() {
     const { email, password, name } = req.body;
     try {
       const hashedPassword = await bcrypt.hash(password, 10);
-      const userCount = (db.prepare("SELECT COUNT(*) as count FROM users").get() as any).count;
+      const userCount = (db.prepare("SELECT COUNT(*) as count FROM users WHERE deleted_at IS NULL").get() as any).count;
       const role = userCount === 0 ? 'SUPER_ADMIN' : 'USER';
       const status = role === 'SUPER_ADMIN' ? 'APPROVED' : 'PENDING';
 
@@ -81,7 +81,7 @@ async function startServer() {
 
   app.post("/api/auth/login", async (req, res) => {
     const { email, password } = req.body;
-    const user = db.prepare("SELECT * FROM users WHERE email = ?").get(email) as any;
+    const user = db.prepare("SELECT * FROM users WHERE email = ? AND deleted_at IS NULL").get(email) as any;
 
     if (!user || !(await bcrypt.compare(password, user.password))) {
       return res.status(401).json({ error: "Invalid credentials" });
@@ -115,7 +115,7 @@ async function startServer() {
 
   app.post("/api/auth/forgot-password", (req, res) => {
     const { email } = req.body;
-    const user = db.prepare("SELECT id FROM users WHERE email = ?").get(email);
+    const user = db.prepare("SELECT id FROM users WHERE email = ? AND deleted_at IS NULL").get(email);
     
     // In a real app, you'd generate a token and send an email here.
     // For this demo, we'll just simulate success to avoid email enumeration.
@@ -124,7 +124,7 @@ async function startServer() {
 
   // User Profile
   app.get("/api/user/profile", authenticateToken, (req: any, res) => {
-    const user = db.prepare("SELECT id, email, name, role, status, currency, language FROM users WHERE id = ?").get(req.user.id) as any;
+    const user = db.prepare("SELECT id, email, name, role, status, currency, language FROM users WHERE id = ? AND deleted_at IS NULL").get(req.user.id) as any;
     
     // Get permissions
     const rolePerms = db.prepare("SELECT permissions FROM role_permissions WHERE role = ?").get(user.role) as any;
@@ -138,9 +138,9 @@ async function startServer() {
     try {
       if (password) {
         const hashedPassword = await bcrypt.hash(password, 10);
-        db.prepare("UPDATE users SET name = ?, password = ?, currency = ?, language = ? WHERE id = ?").run(name, hashedPassword, currency, language, req.user.id);
+        db.prepare("UPDATE users SET name = ?, password = ?, currency = ?, language = ? WHERE id = ? AND deleted_at IS NULL").run(name, hashedPassword, currency, language, req.user.id);
       } else {
-        db.prepare("UPDATE users SET name = ?, currency = ?, language = ? WHERE id = ?").run(name, currency, language, req.user.id);
+        db.prepare("UPDATE users SET name = ?, currency = ?, language = ? WHERE id = ? AND deleted_at IS NULL").run(name, currency, language, req.user.id);
       }
       logActivity(req.user.id, req.user.email, 'UPDATE_PROFILE', 'Updated profile information');
       res.json({ message: "Profile updated" });
@@ -163,7 +163,7 @@ async function startServer() {
 
   // Admin
   app.get("/api/admin/users", authenticateToken, hasPermission('manage_users'), (req, res) => {
-    const users = db.prepare("SELECT id, email, name, role, status, created_at FROM users").all();
+    const users = db.prepare("SELECT id, email, name, role, status, created_at FROM users WHERE deleted_at IS NULL").all();
     res.json(users);
   });
 
@@ -195,10 +195,10 @@ async function startServer() {
     try {
       if (password) {
         const hashedPassword = await bcrypt.hash(password, 10);
-        db.prepare("UPDATE users SET email = ?, name = ?, role = ?, status = ?, password = ? WHERE id = ?")
+        db.prepare("UPDATE users SET email = ?, name = ?, role = ?, status = ?, password = ? WHERE id = ? AND deleted_at IS NULL")
           .run(email, name, role, status, hashedPassword, req.params.id);
       } else {
-        db.prepare("UPDATE users SET email = ?, name = ?, role = ?, status = ? WHERE id = ?")
+        db.prepare("UPDATE users SET email = ?, name = ?, role = ?, status = ? WHERE id = ? AND deleted_at IS NULL")
           .run(email, name, role, status, req.params.id);
       }
       res.json({ message: "User updated successfully" });
@@ -209,7 +209,7 @@ async function startServer() {
 
   app.put("/api/admin/users/:id/status", authenticateToken, hasPermission('manage_users'), (req, res) => {
     const { status } = req.body;
-    db.prepare("UPDATE users SET status = ? WHERE id = ?").run(status, req.params.id);
+    db.prepare("UPDATE users SET status = ? WHERE id = ? AND deleted_at IS NULL").run(status, req.params.id);
     res.json({ message: "User status updated" });
   });
 
@@ -232,7 +232,7 @@ async function startServer() {
   const processRecurringTransactions = (userId: number) => {
     const now = new Date();
     const todayStr = now.toISOString().split('T')[0];
-    const recurring = db.prepare("SELECT * FROM recurring_transactions WHERE userId = ? AND active = 1").all(userId) as any[];
+    const recurring = db.prepare("SELECT * FROM recurring_transactions WHERE userId = ? AND active = 1 AND deleted_at IS NULL").all(userId) as any[];
 
     for (const rt of recurring) {
       let nextDate = new Date(rt.nextDate);
@@ -258,7 +258,7 @@ async function startServer() {
       SELECT t.*, c.name as categoryName 
       FROM transactions t 
       LEFT JOIN categories c ON t.categoryId = c.id 
-      WHERE t.userId = ? 
+      WHERE t.userId = ? AND t.deleted_at IS NULL
       ORDER BY t.date DESC
     `).all(req.user.id);
     res.json(transactions);
@@ -269,7 +269,7 @@ async function startServer() {
       SELECT rt.*, c.name as categoryName 
       FROM recurring_transactions rt 
       LEFT JOIN categories c ON rt.categoryId = c.id 
-      WHERE rt.userId = ?
+      WHERE rt.userId = ? AND rt.deleted_at IS NULL
     `).all(req.user.id);
     res.json(recurring);
   });
@@ -289,7 +289,7 @@ async function startServer() {
     const finalNextDate = nextDate || startDate;
     
     try {
-      const stmt = db.prepare("UPDATE recurring_transactions SET type = ?, amount = ?, categoryId = ?, frequency = ?, startDate = ?, nextDate = ?, description = ?, active = ? WHERE id = ? AND userId = ?");
+      const stmt = db.prepare("UPDATE recurring_transactions SET type = ?, amount = ?, categoryId = ?, frequency = ?, startDate = ?, nextDate = ?, description = ?, active = ? WHERE id = ? AND userId = ? AND deleted_at IS NULL");
       stmt.run(type, amount, categoryId, frequency, startDate, finalNextDate, description, active ? 1 : 0, req.params.id, req.user.id);
       logActivity(req.user.id, req.user.email, 'UPDATE_RECURRING', `Updated recurring transaction #${req.params.id}`);
       res.json({ message: "Recurring transaction updated" });
@@ -299,7 +299,7 @@ async function startServer() {
   });
 
   app.delete("/api/recurring-transactions/:id", authenticateToken, (req: any, res) => {
-    db.prepare("DELETE FROM recurring_transactions WHERE id = ? AND userId = ?").run(req.params.id, req.user.id);
+    db.prepare("UPDATE recurring_transactions SET deleted_at = CURRENT_TIMESTAMP WHERE id = ? AND userId = ?").run(req.params.id, req.user.id);
     logActivity(req.user.id, req.user.email, 'DELETE_RECURRING', `Deleted recurring transaction #${req.params.id}`);
     res.json({ message: "Recurring transaction deleted" });
   });
@@ -315,14 +315,14 @@ async function startServer() {
 
   app.put("/api/transactions/:id", authenticateToken, (req: any, res) => {
     const { type, amount, categoryId, date, description, status } = req.body;
-    const stmt = db.prepare("UPDATE transactions SET type = ?, amount = ?, categoryId = ?, date = ?, description = ?, status = ? WHERE id = ? AND userId = ?");
+    const stmt = db.prepare("UPDATE transactions SET type = ?, amount = ?, categoryId = ?, date = ?, description = ?, status = ? WHERE id = ? AND userId = ? AND deleted_at IS NULL");
     stmt.run(type, amount, categoryId, date, description, status, req.params.id, req.user.id);
     logActivity(req.user.id, req.user.email, 'UPDATE_TRANSACTION', `Updated transaction #${req.params.id}`);
     res.json({ message: "Transaction updated" });
   });
 
   app.delete("/api/transactions/:id", authenticateToken, (req: any, res) => {
-    db.prepare("DELETE FROM transactions WHERE id = ? AND userId = ?").run(req.params.id, req.user.id);
+    db.prepare("UPDATE transactions SET deleted_at = CURRENT_TIMESTAMP WHERE id = ? AND userId = ?").run(req.params.id, req.user.id);
     logActivity(req.user.id, req.user.email, 'DELETE_TRANSACTION', `Deleted transaction #${req.params.id}`);
     res.json({ message: "Transaction deleted" });
   });
@@ -333,7 +333,7 @@ async function startServer() {
       SELECT b.*, c.name as categoryName, c.type as categoryType
       FROM budgets b 
       JOIN categories c ON b.categoryId = c.id 
-      WHERE b.userId = ?
+      WHERE b.userId = ? AND b.deleted_at IS NULL
     `).all(req.user.id);
     res.json(budgets);
   });
@@ -353,7 +353,7 @@ async function startServer() {
   app.put("/api/budgets/:id", authenticateToken, (req: any, res) => {
     const { amount, period } = req.body;
     try {
-      const stmt = db.prepare("UPDATE budgets SET amount = ?, period = ? WHERE id = ? AND userId = ?");
+      const stmt = db.prepare("UPDATE budgets SET amount = ?, period = ? WHERE id = ? AND userId = ? AND deleted_at IS NULL");
       stmt.run(amount, period, req.params.id, req.user.id);
       logActivity(req.user.id, req.user.email, 'UPDATE_BUDGET', `Updated budget #${req.params.id}`);
       res.json({ message: "Budget updated" });
@@ -364,7 +364,7 @@ async function startServer() {
 
   app.delete("/api/budgets/:id", authenticateToken, (req: any, res) => {
     try {
-      db.prepare("DELETE FROM budgets WHERE id = ? AND userId = ?").run(req.params.id, req.user.id);
+      db.prepare("UPDATE budgets SET deleted_at = CURRENT_TIMESTAMP WHERE id = ? AND userId = ?").run(req.params.id, req.user.id);
       logActivity(req.user.id, req.user.email, 'DELETE_BUDGET', `Deleted budget #${req.params.id}`);
       res.json({ message: "Budget deleted" });
     } catch (error: any) {
@@ -378,7 +378,7 @@ async function startServer() {
         SELECT c.name as Category, c.type as Type, b.amount as Amount, b.period as Period
         FROM budgets b 
         JOIN categories c ON b.categoryId = c.id 
-        WHERE b.userId = ?
+        WHERE b.userId = ? AND b.deleted_at IS NULL
       `).all(req.user.id);
       
       const format = req.params.format;
@@ -406,7 +406,7 @@ async function startServer() {
 
   // Categories
   app.get("/api/categories", authenticateToken, (req: any, res) => {
-    const categories = db.prepare("SELECT * FROM categories WHERE userId IS NULL OR userId = ?").all(req.user.id);
+    const categories = db.prepare("SELECT * FROM categories WHERE (userId IS NULL OR userId = ?) AND deleted_at IS NULL").all(req.user.id);
     res.json(categories);
   });
 
@@ -425,8 +425,9 @@ async function startServer() {
   app.put("/api/categories/:id", authenticateToken, (req: any, res) => {
     const { name, type } = req.body;
     try {
-      const stmt = db.prepare("UPDATE categories SET name = ?, type = ? WHERE id = ? AND (userId = ? OR ? = 'SUPER_ADMIN')");
+      const stmt = db.prepare("UPDATE categories SET name = ?, type = ? WHERE id = ? AND (userId = ? OR ? = 'SUPER_ADMIN') AND deleted_at IS NULL");
       stmt.run(name, type, req.params.id, req.user.id, req.user.role);
+      logActivity(req.user.id, req.user.email, 'UPDATE_CATEGORY', `Updated category #${req.params.id}`);
       res.json({ message: "Category updated" });
     } catch (error: any) {
       res.status(400).json({ error: error.message });
@@ -435,7 +436,7 @@ async function startServer() {
 
   app.delete("/api/categories/:id", authenticateToken, (req: any, res) => {
     try {
-      db.prepare("DELETE FROM categories WHERE id = ? AND (userId = ? OR ? = 'SUPER_ADMIN')").run(req.params.id, req.user.id, req.user.role);
+      db.prepare("UPDATE categories SET deleted_at = CURRENT_TIMESTAMP WHERE id = ? AND (userId = ? OR ? = 'SUPER_ADMIN')").run(req.params.id, req.user.id, req.user.role);
       logActivity(req.user.id, req.user.email, 'DELETE_CATEGORY', `Deleted category #${req.params.id}`);
       res.json({ message: "Category deleted" });
     } catch (error: any) {
@@ -448,16 +449,16 @@ async function startServer() {
     try {
       const userId = req.user.id;
       
-      const user = db.prepare("SELECT id, email, name, role, currency, language, created_at FROM users WHERE id = ?").get(userId) as any;
-      const transactions = db.prepare("SELECT * FROM transactions WHERE userId = ?").all(userId);
-      const recurring = db.prepare("SELECT * FROM recurring_transactions WHERE userId = ?").all(userId);
+      const user = db.prepare("SELECT id, email, name, role, currency, language, created_at FROM users WHERE id = ? AND deleted_at IS NULL").get(userId) as any;
+      const transactions = db.prepare("SELECT * FROM transactions WHERE userId = ? AND deleted_at IS NULL").all(userId);
+      const recurring = db.prepare("SELECT * FROM recurring_transactions WHERE userId = ? AND deleted_at IS NULL").all(userId);
       const budgets = db.prepare(`
         SELECT b.*, c.name as categoryName 
         FROM budgets b 
         JOIN categories c ON b.categoryId = c.id 
-        WHERE b.userId = ?
+        WHERE b.userId = ? AND b.deleted_at IS NULL
       `).all(userId);
-      const categories = db.prepare("SELECT * FROM categories WHERE userId = ? OR userId IS NULL").all(userId);
+      const categories = db.prepare("SELECT * FROM categories WHERE (userId = ? OR userId IS NULL) AND deleted_at IS NULL").all(userId);
       
       const exportData = {
         profile: user,
@@ -501,7 +502,7 @@ async function startServer() {
 
         // Helper to get categoryId by name for this user
         const getCatId = (name: string, type: string) => {
-          const row = db.prepare("SELECT id FROM categories WHERE name = ? AND type = ? AND (userId = ? OR userId IS NULL)").get(name, type, userId) as any;
+          const row = db.prepare("SELECT id FROM categories WHERE name = ? AND type = ? AND (userId = ? OR userId IS NULL) AND deleted_at IS NULL").get(name, type, userId) as any;
           return row ? row.id : null;
         };
 
@@ -581,7 +582,7 @@ async function startServer() {
       SELECT t.type, t.amount, c.name as category, t.date, t.description 
       FROM transactions t 
       LEFT JOIN categories c ON t.categoryId = c.id 
-      WHERE t.userId = ?
+      WHERE t.userId = ? AND t.deleted_at IS NULL
     `).all(req.user.id);
     
     if (req.params.format === 'csv' || req.params.format === 'xlsx') {
@@ -640,10 +641,10 @@ async function startServer() {
       const googleUser = await userResponse.json();
 
       // 3. Find or create user in DB
-      let user = db.prepare("SELECT * FROM users WHERE email = ?").get(googleUser.email) as any;
+      let user = db.prepare("SELECT * FROM users WHERE email = ? AND deleted_at IS NULL").get(googleUser.email) as any;
       
       if (!user) {
-        const userCount = (db.prepare("SELECT COUNT(*) as count FROM users").get() as any).count;
+        const userCount = (db.prepare("SELECT COUNT(*) as count FROM users WHERE deleted_at IS NULL").get() as any).count;
         const role = userCount === 0 ? 'SUPER_ADMIN' : 'USER';
         // First user is approved automatically, others need approval
         const status = role === 'SUPER_ADMIN' ? 'APPROVED' : 'PENDING';
