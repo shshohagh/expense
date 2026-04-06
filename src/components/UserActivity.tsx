@@ -2,39 +2,32 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { motion } from 'motion/react';
 import { History, Clock, Activity, AlertCircle } from 'lucide-react';
+import { subscribeToActivityLogs } from '../services/firestoreService';
 
 interface ActivityLog {
   userEmail: string;
   userName: string;
   action: string;
   details: string;
-  created_at: string;
+  created_at: any;
 }
 
 export default function UserActivity() {
-  const { token } = useAuth();
+  const { user } = useAuth();
   const [activities, setActivities] = useState<ActivityLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   useEffect(() => {
-    fetchActivities();
-  }, []);
+    if (!user?.id) return;
 
-  const fetchActivities = async () => {
-    try {
-      const res = await fetch('/api/user/activity', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (!res.ok) throw new Error('Failed to fetch activities');
-      const data = await res.json();
-      setActivities(data);
-    } catch (err) {
-      setError('Could not load activity log');
-    } finally {
+    const unsubscribe = subscribeToActivityLogs(user.id.toString(), (data) => {
+      setActivities(data as ActivityLog[]);
       setLoading(false);
-    }
-  };
+    });
+
+    return () => unsubscribe();
+  }, [user?.id]);
 
   const getActionIcon = (action: string) => {
     switch (action) {
@@ -111,7 +104,7 @@ export default function UserActivity() {
                     </div>
                     <div className="flex items-center gap-1.5 text-xs text-muted-foreground shrink-0">
                       <Clock size={12} />
-                      {new Date(activity.created_at).toLocaleString()}
+                      {activity.created_at?.toDate ? activity.created_at.toDate().toLocaleString() : new Date(activity.created_at).toLocaleString()}
                     </div>
                   </div>
                   <p className="text-sm text-muted-foreground mt-1">{activity.details}</p>

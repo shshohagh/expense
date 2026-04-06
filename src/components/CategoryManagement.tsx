@@ -2,21 +2,16 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { Plus, Edit2, Trash2, X, Tag } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-
-interface Category {
-  id: number;
-  userId: number | null;
-  name: string;
-  type: 'INCOME' | 'EXPENSE';
-}
+import { subscribeToCategories, addCategory, updateCategory, deleteCategory } from '../services/firestoreService';
+import { Category } from '../types';
 
 export default function CategoryManagement() {
-  const { token, user } = useAuth();
+  const { user } = useAuth();
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [itemToDelete, setItemToDelete] = useState<number | null>(null);
+  const [itemToDelete, setItemToDelete] = useState<string | null>(null);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
   const [formData, setFormData] = useState({
     name: '',
@@ -24,51 +19,39 @@ export default function CategoryManagement() {
   });
 
   useEffect(() => {
-    fetchCategories();
-  }, []);
+    if (!user?.id) return;
 
-  const fetchCategories = async () => {
-    try {
-      const res = await fetch('/api/categories', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        setCategories(await res.json());
-      }
-    } catch (error) {
-      console.error(error);
-    } finally {
+    const unsubscribe = subscribeToCategories(user.id.toString(), (data) => {
+      setCategories(data);
       setLoading(false);
-    }
-  };
+    });
+
+    return () => unsubscribe();
+  }, [user?.id]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const url = editingCategory ? `/api/categories/${editingCategory.id}` : '/api/categories';
-    const method = editingCategory ? 'PUT' : 'POST';
+    if (!user?.id) return;
 
     try {
-      const res = await fetch(url, {
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(formData),
-      });
-
-      if (res.ok) {
-        setIsModalOpen(false);
-        setEditingCategory(null);
-        setFormData({ name: '', type: 'EXPENSE' });
-        fetchCategories();
+      if (editingCategory) {
+        await updateCategory(editingCategory.id, formData);
+      } else {
+        await addCategory({
+          ...formData,
+          userId: user.id.toString()
+        });
       }
+
+      setIsModalOpen(false);
+      setEditingCategory(null);
+      setFormData({ name: '', type: 'EXPENSE' });
     } catch (error) {
       console.error(error);
     }
   };
 
-  const handleDelete = async (id: number) => {
+  const handleDelete = (id: string) => {
     setItemToDelete(id);
     setShowDeleteConfirm(true);
   };
@@ -76,15 +59,9 @@ export default function CategoryManagement() {
   const confirmDelete = async () => {
     if (!itemToDelete) return;
     try {
-      const res = await fetch(`/api/categories/${itemToDelete}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        fetchCategories();
-        setShowDeleteConfirm(false);
-        setItemToDelete(null);
-      }
+      await deleteCategory(itemToDelete);
+      setShowDeleteConfirm(false);
+      setItemToDelete(null);
     } catch (error) {
       console.error(error);
     }
@@ -245,9 +222,9 @@ function CategorySection({ title, categories, onEdit, onDelete, type, currentUse
   title: string, 
   categories: Category[], 
   onEdit: (c: Category) => void, 
-  onDelete: (id: number) => void,
+  onDelete: (id: string) => void,
   type: 'INCOME' | 'EXPENSE',
-  currentUserId?: number,
+  currentUserId?: string,
   userRole?: string
 }) {
   return (
@@ -289,7 +266,7 @@ function CategorySection({ title, categories, onEdit, onDelete, type, currentUse
                       <Edit2 size={16} />
                     </button>
                     <button
-                      onClick={() => onDelete(cat.id)}
+                      onClick={() => onDelete(cat.id.toString())}
                       className="p-2 text-zinc-500 hover:text-rose-600 transition-colors"
                     >
                       <Trash2 size={16} />

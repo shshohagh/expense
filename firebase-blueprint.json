@@ -1,0 +1,84 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile and settings",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string", "enum": ["USER", "ADMIN", "SUPER_ADMIN"] },
+        "status": { "type": "string", "enum": ["PENDING", "APPROVED", "REJECTED", "CANCEL"] },
+        "currency": { "type": "string" },
+        "language": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "deleted_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["email", "role", "status"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Income or expense record",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "type": { "type": "string", "enum": ["INCOME", "EXPENSE"] },
+        "amount": { "type": "number" },
+        "categoryId": { "type": "string" },
+        "categoryName": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "description": { "type": "string" },
+        "status": { "type": "string", "enum": ["ACTIVE", "INACTIVE"] },
+        "created_at": { "type": "string", "format": "date-time" },
+        "deleted_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "type", "amount", "date"]
+    },
+    "Category": {
+      "title": "Category",
+      "description": "Transaction category",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "type": { "type": "string", "enum": ["INCOME", "EXPENSE"] },
+        "deleted_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "type"]
+    },
+    "Budget": {
+      "title": "Budget",
+      "description": "Budget goal for a category",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "categoryId": { "type": "string" },
+        "categoryName": { "type": "string" },
+        "categoryType": { "type": "string", "enum": ["INCOME", "EXPENSE"] },
+        "amount": { "type": "number" },
+        "period": { "type": "string", "enum": ["MONTHLY", "YEARLY"] },
+        "created_at": { "type": "string", "format": "date-time" },
+        "deleted_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "categoryId", "amount", "period"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile data"
+    },
+    "/transactions/{transactionId}": {
+      "schema": "Transaction",
+      "description": "Transaction records"
+    },
+    "/categories/{categoryId}": {
+      "schema": "Category",
+      "description": "Transaction categories"
+    },
+    "/budgets/{budgetId}": {
+      "schema": "Budget",
+      "description": "Budget definitions"
+    }
+  }
+}

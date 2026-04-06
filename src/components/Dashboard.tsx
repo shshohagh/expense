@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { Transaction, Budget } from '../types';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
-  LineChart, Line, Cell, PieChart, Pie, Legend 
+  PieChart, Pie, Cell, Legend 
 } from 'recharts';
 import { formatCurrency, t } from '../utils/i18n';
 import { 
@@ -11,9 +11,10 @@ import {
   Eye, EyeOff, Target, PiggyBank, Percent, Calendar
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { subscribeToTransactions, subscribeToBudgets } from '../services/firestoreService';
 
 export default function Dashboard() {
-  const { token, user } = useAuth();
+  const { user } = useAuth();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [loading, setLoading] = useState(true);
@@ -23,49 +24,32 @@ export default function Dashboard() {
   const lang = user?.language || 'en';
   const currency = user?.currency || 'USD';
 
+  const toggleBalance = () => {
+    setShowBalance(!showBalance);
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    if (!showBalance) {
+      timeoutRef.current = setTimeout(() => setShowBalance(false), 5000);
+    }
+  };
+
   useEffect(() => {
-    fetchTransactions();
-    fetchBudgets();
+    if (!user?.id) return;
+
+    const unsubTransactions = subscribeToTransactions(user.id.toString(), (data) => {
+      setTransactions(data);
+      setLoading(false);
+    });
+
+    const unsubBudgets = subscribeToBudgets(user.id.toString(), (data) => {
+      setBudgets(data);
+    });
+
     return () => {
+      unsubTransactions();
+      unsubBudgets();
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
     };
-  }, []);
-
-  const toggleBalance = () => {
-    setShowBalance(true);
-    if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    timeoutRef.current = setTimeout(() => setShowBalance(false), 5000);
-  };
-
-  const fetchTransactions = async () => {
-    try {
-      const res = await fetch('/api/transactions', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setTransactions(data);
-      }
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchBudgets = async () => {
-    try {
-      const res = await fetch('/api/budgets', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setBudgets(data);
-      }
-    } catch (error) {
-      console.error(error);
-    }
-  };
+  }, [user?.id]);
 
   const activeTransactions = transactions.filter(t => t.status === 'ACTIVE' || !t.status);
 

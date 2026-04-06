@@ -1,7 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion } from 'motion/react';
 import { LogIn, UserPlus, AlertCircle, Eye, EyeOff, CheckCircle2 } from 'lucide-react';
+import { auth } from '../firebase';
+import { 
+  signInWithEmailAndPassword, 
+  createUserWithEmailAndPassword, 
+  signInWithPopup, 
+  GoogleAuthProvider,
+  sendPasswordResetEmail
+} from 'firebase/auth';
 
 export default function Auth() {
   const { login } = useAuth();
@@ -23,29 +31,32 @@ export default function Auth() {
     setError('');
     
     try {
-      const endpoint = isLogin ? '/api/auth/login' : '/api/auth/register';
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
-      });
-
-      const data = await res.json();
-      if (res.ok) {
-        login(data.token, data.user);
+      if (isLogin) {
+        await signInWithEmailAndPassword(auth, formData.email, formData.password);
       } else {
-        setError(data.error);
+        await createUserWithEmailAndPassword(auth, formData.email, formData.password);
+        // Profile creation is handled in AuthContext's onAuthStateChanged
       }
-    } catch (err) {
-      setError('An error occurred. Please try again.');
+    } catch (err: any) {
+      console.error('Auth error:', err);
+      setError(err.message || 'An error occurred. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleGoogleAuth = () => {
-    // In a real app, this would redirect to Google OAuth
-    setError('Google authentication is not configured in this demo.');
+  const handleGoogleAuth = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const provider = new GoogleAuthProvider();
+      await signInWithPopup(auth, provider);
+    } catch (err: any) {
+      console.error('Google auth error:', err);
+      setError(err.message || 'Google authentication failed.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleForgotPassword = async (e: React.FormEvent) => {
@@ -55,21 +66,12 @@ export default function Auth() {
     setMessage('');
 
     try {
-      const res = await fetch('/api/auth/forgot-password', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: formData.email }),
-      });
-
-      const data = await res.json();
-      if (res.ok) {
-        setMessage(data.message);
-        setIsForgotPassword(false);
-      } else {
-        setError(data.error);
-      }
-    } catch (err) {
-      setError('Failed to send reset email. Please try again.');
+      await sendPasswordResetEmail(auth, formData.email);
+      setMessage('Password reset email sent. Please check your inbox.');
+      setIsForgotPassword(false);
+    } catch (err: any) {
+      console.error('Reset password error:', err);
+      setError(err.message || 'Failed to send reset email. Please try again.');
     } finally {
       setLoading(false);
     }

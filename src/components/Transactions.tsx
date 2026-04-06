@@ -5,22 +5,29 @@ import { formatDate } from '../lib/utils';
 import { formatCurrency } from '../utils/i18n';
 import { Plus, Trash2, Edit2, Download, Filter } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { 
+  subscribeToTransactions, 
+  subscribeToCategories, 
+  addTransaction, 
+  updateTransaction, 
+  deleteTransaction 
+} from '../services/firestoreService';
 
 export default function Transactions() {
-  const { token, user } = useAuth();
+  const { user } = useAuth();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [itemToDelete, setItemToDelete] = useState<number | null>(null);
-  const [editingId, setEditingId] = useState<number | null>(null);
+  const [itemToDelete, setItemToDelete] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
   
   const [dateFilter, setDateFilter] = useState<'today' | 'yesterday' | 'last7' | 'last30' | 'thisWeek' | 'thisMonth' | 'thisYear' | 'lifetime' | 'custom'>('lifetime');
   const [customDateRange, setCustomDateRange] = useState({ start: '', end: '' });
 
   const [formData, setFormData] = useState({
-    type: 'EXPENSE',
+    type: 'EXPENSE' as 'INCOME' | 'EXPENSE',
     amount: '',
     categoryId: '',
     date: new Date().toISOString().split('T')[0],
@@ -29,61 +36,62 @@ export default function Transactions() {
   });
 
   useEffect(() => {
-    fetchData();
-  }, []);
+    if (!user?.id) return;
 
-  const fetchData = async () => {
-    try {
-      const [tRes, cRes] = await Promise.all([
-        fetch('/api/transactions', { headers: { Authorization: `Bearer ${token}` } }),
-        fetch('/api/categories', { headers: { Authorization: `Bearer ${token}` } }),
-      ]);
-      if (tRes.ok) setTransactions(await tRes.json());
-      if (cRes.ok) setCategories(await cRes.json());
-    } catch (error) {
-      console.error(error);
-    } finally {
+    const unsubTransactions = subscribeToTransactions(user.id.toString(), (data) => {
+      setTransactions(data);
       setLoading(false);
-    }
-  };
+    });
+
+    const unsubCategories = subscribeToCategories(user.id.toString(), (data) => {
+      setCategories(data);
+    });
+
+    return () => {
+      unsubTransactions();
+      unsubCategories();
+    };
+  }, [user?.id]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const url = editingId ? `/api/transactions/${editingId}` : '/api/transactions';
-    const method = editingId ? 'PUT' : 'POST';
+    if (!user?.id) return;
+
+    const category = categories.find(c => c.id.toString() === formData.categoryId);
+    const transactionData = {
+      userId: user.id.toString(),
+      type: formData.type,
+      amount: parseFloat(formData.amount),
+      categoryId: formData.categoryId,
+      categoryName: category?.name || 'Unknown',
+      date: formData.date,
+      description: formData.description,
+      status: formData.status,
+    };
 
     try {
-      const res = await fetch(url, {
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          ...formData,
-          amount: parseFloat(formData.amount),
-        }),
-      });
-
-      if (res.ok) {
-        setShowModal(false);
-        setEditingId(null);
-        setFormData({
-          type: 'EXPENSE',
-          amount: '',
-          categoryId: '',
-          date: new Date().toISOString().split('T')[0],
-          description: '',
-          status: 'ACTIVE',
-        });
-        fetchData();
+      if (editingId) {
+        await updateTransaction(editingId, transactionData);
+      } else {
+        await addTransaction(transactionData);
       }
+
+      setShowModal(false);
+      setEditingId(null);
+      setFormData({
+        type: 'EXPENSE',
+        amount: '',
+        categoryId: '',
+        date: new Date().toISOString().split('T')[0],
+        description: '',
+        status: 'ACTIVE',
+      });
     } catch (error) {
       console.error(error);
     }
   };
 
-  const handleDelete = async (id: number) => {
+  const handleDelete = (id: string) => {
     setItemToDelete(id);
     setShowDeleteConfirm(true);
   };
@@ -91,37 +99,41 @@ export default function Transactions() {
   const confirmDelete = async () => {
     if (!itemToDelete) return;
     try {
-      const res = await fetch(`/api/transactions/${itemToDelete}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        fetchData();
-        setShowDeleteConfirm(false);
-        setItemToDelete(null);
-      }
+      await deleteTransaction(itemToDelete);
+      setShowDeleteConfirm(false);
+      setItemToDelete(null);
     } catch (error) {
       console.error(error);
     }
   };
 
   const handleExport = (format: 'csv' | 'xlsx') => {
-    window.open(`/api/export/${format}?token=${token}`, '_blank');
-    // Note: In a real app, you'd handle token passing more securely, e.g., via a temporary download token
-    // For this demo, we'll use a direct link if the server supports it or just fetch and blob.
-    fetch(`/api/export/${format}`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-    .then(res => res.blob())
-    .then(blob => {
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `transactions.${format}`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-    });
+    // For Firebase, we'll generate the export client-side
+    const dataToExport = filteredTransactions.map(t => ({
+      Date: formatDate(t.date),
+      Category: t.categoryName || 'Unknown',
+      Description: t.description || '',
+      Type: t.type,
+      Status: t.status,
+      Amount: t.amount
+    }));
+
+    if (format === 'csv') {
+      const headers = Object.keys(dataToExport[0]).join(',');
+      const rows = dataToExport.map(row => Object.values(row).join(','));
+      const csvContent = [headers, ...rows].join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.setAttribute('href', url);
+      link.setAttribute('download', `transactions.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } else {
+      // For XLSX, we'd need a library like 'xlsx'
+      alert('Excel export requires additional libraries. Please use CSV for now.');
+    }
   };
 
   const filteredCategories = categories.filter(c => c.type === formData.type);

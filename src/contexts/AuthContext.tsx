@@ -1,5 +1,8 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User, AuthState } from '../types';
+import { auth, db } from '../firebase';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
 
 interface AuthContextType extends AuthState {
   login: (token: string, user: User) => void;
@@ -12,58 +15,80 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<AuthState>({
     user: null,
-    token: localStorage.getItem('token'),
+    token: null,
     isAuthenticated: false,
     isLoading: true,
   });
 
   useEffect(() => {
-    const verifyToken = async () => {
-      if (!state.token) {
-        setState(prev => ({ ...prev, isLoading: false }));
-        return;
-      }
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        try {
+          const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
+          let userData: User;
 
-      try {
-        const res = await fetch('/api/user/profile', {
-          headers: { Authorization: `Bearer ${state.token}` },
-        });
-        if (res.ok) {
-          const user = await res.json();
+          if (userDoc.exists()) {
+            userData = userDoc.data() as User;
+          } else {
+            // Create initial user profile if it doesn't exist
+            const isSuperAdmin = firebaseUser.email === 'shshohagh4@gmail.com';
+            userData = {
+              id: firebaseUser.uid as any,
+              email: firebaseUser.email || '',
+              name: firebaseUser.displayName || 'User',
+              role: isSuperAdmin ? 'SUPER_ADMIN' : 'USER',
+              status: isSuperAdmin ? 'APPROVED' : 'PENDING',
+              currency: 'USD',
+              language: 'en',
+              permissions: isSuperAdmin ? ['manage_users', 'manage_categories', 'export_data', 'view_admin_panel'] : [],
+              created_at: new Date().toISOString(),
+            };
+            await setDoc(doc(db, 'users', firebaseUser.uid), {
+              ...userData,
+              created_at: serverTimestamp(),
+            });
+          }
+
+          const token = await firebaseUser.getIdToken();
           setState({
-            user,
-            token: state.token,
+            user: userData,
+            token,
             isAuthenticated: true,
             isLoading: false,
           });
-        } else {
-          localStorage.removeItem('token');
-          setState({ user: null, token: null, isAuthenticated: false, isLoading: false });
+        } catch (error) {
+          console.error('Error fetching user profile:', error);
+          setState(prev => ({ ...prev, isLoading: false }));
         }
-      } catch (error) {
-        setState(prev => ({ ...prev, isLoading: false }));
+      } else {
+        setState({ user: null, token: null, isAuthenticated: false, isLoading: false });
       }
-    };
+    });
 
-    verifyToken();
-  }, [state.token]);
+    return () => unsubscribe();
+  }, []);
 
   const login = (token: string, user: User) => {
-    localStorage.setItem('token', token);
+    // This is now handled by onAuthStateChanged
     setState({ user, token, isAuthenticated: true, isLoading: false });
   };
 
-  const logout = () => {
-    localStorage.removeItem('token');
+  const logout = async () => {
+    await signOut(auth);
     setState({ user: null, token: null, isAuthenticated: false, isLoading: false });
   };
 
-  const updateUser = (userData: Partial<User>) => {
-    if (state.user) {
-      setState(prev => ({
-        ...prev,
-        user: { ...prev.user!, ...userData }
-      }));
+  const updateUser = async (userData: Partial<User>) => {
+    if (state.user && auth.currentUser) {
+      try {
+        await setDoc(doc(db, 'users', auth.currentUser.uid), userData, { merge: true });
+        setState(prev => ({
+          ...prev,
+          user: { ...prev.user!, ...userData }
+        }));
+      } catch (error) {
+        console.error('Error updating user profile:', error);
+      }
     }
   };
 

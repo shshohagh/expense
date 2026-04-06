@@ -3,34 +3,41 @@ import { useAuth } from '../contexts/AuthContext';
 import { formatCurrency } from '../utils/i18n';
 import { Plus, Edit2, Trash2, X, RefreshCw, Calendar, Tag, ArrowUpCircle, ArrowDownCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { 
+  subscribeToRecurringTransactions, 
+  subscribeToCategories,
+  addRecurringTransaction,
+  updateRecurringTransaction,
+  deleteRecurringTransaction
+} from '../services/firestoreService';
 
 interface RecurringTransaction {
-  id: number;
+  id: string;
   type: 'INCOME' | 'EXPENSE';
   amount: number;
-  categoryId: number;
+  categoryId: string;
   categoryName?: string;
   frequency: 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'YEARLY';
   startDate: string;
   nextDate: string;
   description: string;
-  active: number;
+  active: boolean;
 }
 
 interface Category {
-  id: number;
+  id: string;
   name: string;
   type: 'INCOME' | 'EXPENSE';
 }
 
 export default function RecurringTransactions() {
-  const { token, user } = useAuth();
+  const { user } = useAuth();
   const [recurring, setRecurring] = useState<RecurringTransaction[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [itemToDelete, setItemToDelete] = useState<number | null>(null);
+  const [itemToDelete, setItemToDelete] = useState<string | null>(null);
   const [editingRT, setEditingRT] = useState<RecurringTransaction | null>(null);
   
   const [formData, setFormData] = useState({
@@ -45,55 +52,51 @@ export default function RecurringTransactions() {
   });
 
   useEffect(() => {
-    fetchData();
-  }, []);
+    if (!user?.id) return;
 
-  const fetchData = async () => {
-    try {
-      const [rtRes, catRes] = await Promise.all([
-        fetch('/api/recurring-transactions', { headers: { Authorization: `Bearer ${token}` } }),
-        fetch('/api/categories', { headers: { Authorization: `Bearer ${token}` } })
-      ]);
-      
-      if (rtRes.ok) setRecurring(await rtRes.json());
-      if (catRes.ok) setCategories(await catRes.json());
-    } catch (error) {
-      console.error(error);
-    } finally {
+    const unsubRT = subscribeToRecurringTransactions(user.id.toString(), (data) => {
+      setRecurring(data as RecurringTransaction[]);
       setLoading(false);
-    }
-  };
+    });
+
+    const unsubCat = subscribeToCategories(user.id.toString(), (data) => {
+      setCategories(data as any as Category[]);
+    });
+
+    return () => {
+      unsubRT();
+      unsubCat();
+    };
+  }, [user?.id]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const url = editingRT ? `/api/recurring-transactions/${editingRT.id}` : '/api/recurring-transactions';
-    const method = editingRT ? 'PUT' : 'POST';
+    if (!user?.id) return;
+
+    const category = categories.find(c => c.id === formData.categoryId);
+    const data = {
+      ...formData,
+      userId: user.id.toString(),
+      amount: parseFloat(formData.amount),
+      categoryName: category?.name || 'Unknown'
+    };
 
     try {
-      const res = await fetch(url, {
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          ...formData,
-          amount: parseFloat(formData.amount),
-        }),
-      });
-
-      if (res.ok) {
-        setIsModalOpen(false);
-        setEditingRT(null);
-        resetForm();
-        fetchData();
+      if (editingRT) {
+        await updateRecurringTransaction(editingRT.id, data);
+      } else {
+        await addRecurringTransaction(data);
       }
+
+      setIsModalOpen(false);
+      setEditingRT(null);
+      resetForm();
     } catch (error) {
       console.error(error);
     }
   };
 
-  const handleDelete = async (id: number) => {
+  const handleDelete = (id: string) => {
     setItemToDelete(id);
     setShowDeleteConfirm(true);
   };
@@ -101,15 +104,9 @@ export default function RecurringTransactions() {
   const confirmDelete = async () => {
     if (!itemToDelete) return;
     try {
-      const res = await fetch(`/api/recurring-transactions/${itemToDelete}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        fetchData();
-        setShowDeleteConfirm(false);
-        setItemToDelete(null);
-      }
+      await deleteRecurringTransaction(itemToDelete);
+      setShowDeleteConfirm(false);
+      setItemToDelete(null);
     } catch (error) {
       console.error(error);
     }
@@ -138,7 +135,7 @@ export default function RecurringTransactions() {
       startDate: rt.startDate,
       nextDate: rt.nextDate,
       description: rt.description,
-      active: rt.active === 1
+      active: rt.active
     });
     setIsModalOpen(true);
   };

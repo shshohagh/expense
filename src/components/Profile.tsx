@@ -3,15 +3,18 @@ import { useAuth } from '../contexts/AuthContext';
 import { motion } from 'motion/react';
 import { User, Lock, Save, CheckCircle, Eye, EyeOff, Globe, Coins, Download, Database, Upload, AlertTriangle } from 'lucide-react';
 import { currencies, languages } from '../utils/i18n';
+import { updatePassword, EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
+import { auth } from '../firebase';
 
 export default function Profile() {
-  const { user, token, updateUser } = useAuth();
+  const { user, updateUser } = useAuth();
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [message, setMessage] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
   
   const [formData, setFormData] = useState({
     name: user?.name || '',
@@ -22,78 +25,11 @@ export default function Profile() {
   });
 
   const handleExport = async () => {
-    setExporting(true);
-    try {
-      const res = await fetch('/api/user/export-json', {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (!res.ok) throw new Error('Export failed');
-      
-      const blob = await res.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `expense_data_${new Date().toISOString().split('T')[0]}.json`;
-      document.body.appendChild(a);
-      a.click();
-      window.URL.revokeObjectURL(url);
-      document.body.removeChild(a);
-    } catch (error) {
-      console.error(error);
-      alert('Failed to export data');
-    } finally {
-      setExporting(false);
-    }
+    alert('Exporting data from Firebase is currently being implemented.');
   };
 
   const handleRestore = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    if (!confirm('Warning: Restoring data will overwrite all your current transactions and recurring entries. This action cannot be undone. Do you want to proceed?')) {
-      e.target.value = '';
-      return;
-    }
-
-    setRestoring(true);
-    try {
-      const reader = new FileReader();
-      reader.onload = async (event) => {
-        try {
-          const data = JSON.parse(event.target?.result as string);
-          const res = await fetch('/api/user/restore-json', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${token}`,
-            },
-            body: JSON.stringify(data),
-          });
-
-          if (res.ok) {
-            setMessage('Data restored successfully! Please refresh the page to see changes.');
-            if (data.profile) {
-              updateUser({
-                currency: data.profile.currency,
-                language: data.profile.language,
-              });
-            }
-          } else {
-            const err = await res.json();
-            alert(err.error || 'Failed to restore data');
-          }
-        } catch (err) {
-          alert('Invalid JSON file format');
-        } finally {
-          setRestoring(false);
-        }
-      };
-      reader.readAsText(file);
-    } catch (error) {
-      console.error(error);
-      alert('Failed to read file');
-      setRestoring(false);
-    }
+    alert('Restoring data to Firebase is currently being implemented.');
     e.target.value = '';
   };
 
@@ -108,31 +44,32 @@ export default function Profile() {
     setMessage('');
 
     try {
-      const res = await fetch('/api/user/profile', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          name: formData.name,
-          password: formData.password || undefined,
-          currency: formData.currency,
-          language: formData.language,
-        }),
+      // Update Firestore profile
+      await updateUser({
+        name: formData.name,
+        currency: formData.currency,
+        language: formData.language,
       });
 
-      if (res.ok) {
-        updateUser({ 
-          name: formData.name,
-          currency: formData.currency,
-          language: formData.language,
-        });
-        setMessage('Profile updated successfully!');
-        setFormData(prev => ({ ...prev, password: '', confirmPassword: '' }));
+      // Update Password if provided
+      if (formData.password && auth.currentUser) {
+        if (!currentPassword) {
+          alert('Please enter your current password to change it.');
+          setLoading(false);
+          return;
+        }
+
+        const credential = EmailAuthProvider.credential(auth.currentUser.email!, currentPassword);
+        await reauthenticateWithCredential(auth.currentUser, credential);
+        await updatePassword(auth.currentUser, formData.password);
       }
-    } catch (error) {
+
+      setMessage('Profile updated successfully!');
+      setFormData(prev => ({ ...prev, password: '', confirmPassword: '' }));
+      setCurrentPassword('');
+    } catch (error: any) {
       console.error(error);
+      alert(error.message || 'Failed to update profile');
     } finally {
       setLoading(false);
     }
@@ -229,6 +166,16 @@ export default function Profile() {
               Security
             </h2>
             <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2 sm:col-span-2">
+                <label className="text-sm font-medium">Current Password (Required to change password)</label>
+                <input
+                  type="password"
+                  value={currentPassword}
+                  onChange={(e) => setCurrentPassword(e.target.value)}
+                  className="w-full px-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100"
+                  placeholder="Enter current password"
+                />
+              </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium">New Password</label>
                 <div className="relative">

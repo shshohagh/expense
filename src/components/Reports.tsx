@@ -8,9 +8,10 @@ import {
 import { formatCurrency, t } from '../utils/i18n';
 import { FileText, Download, Calendar, Filter, ChevronDown } from 'lucide-react';
 import { motion } from 'motion/react';
+import { subscribeToTransactions } from '../services/firestoreService';
 
 export default function Reports() {
-  const { token, user } = useAuth();
+  const { user } = useAuth();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [reportType, setReportType] = useState<'daily' | 'weekly' | 'monthly'>('monthly');
@@ -21,24 +22,15 @@ export default function Reports() {
   const currency = user?.currency || 'USD';
 
   useEffect(() => {
-    fetchTransactions();
-  }, []);
+    if (!user?.id) return;
 
-  const fetchTransactions = async () => {
-    try {
-      const res = await fetch('/api/transactions', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setTransactions(data);
-      }
-    } catch (error) {
-      console.error(error);
-    } finally {
+    const unsubscribe = subscribeToTransactions(user.id.toString(), (data) => {
+      setTransactions(data);
       setLoading(false);
-    }
-  };
+    });
+
+    return () => unsubscribe();
+  }, [user?.id]);
 
   const activeTransactions = transactions.filter(t => t.status === 'ACTIVE' || !t.status);
 

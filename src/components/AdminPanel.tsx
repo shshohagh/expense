@@ -3,6 +3,13 @@ import { useAuth } from '../contexts/AuthContext';
 import { User } from '../types';
 import { Shield, User as UserIcon, Plus, Edit2, X, Eye, EyeOff, Lock, Check, AlertCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { 
+  subscribeToUsers, 
+  updateUserStatus, 
+  subscribeToRolePermissions, 
+  updateRolePermissions, 
+  subscribeToAllActivityLogs 
+} from '../services/firestoreService';
 
 interface RolePermission {
   role: string;
@@ -17,7 +24,7 @@ const AVAILABLE_PERMISSIONS = [
 ];
 
 export default function AdminPanel() {
-  const { token, user: currentUser } = useAuth();
+  const { user: currentUser } = useAuth();
   const [users, setUsers] = useState<User[]>([]);
   const [rolePermissions, setRolePermissions] = useState<RolePermission[]>([]);
   const [activities, setActivities] = useState<any[]>([]);
@@ -35,51 +42,27 @@ export default function AdminPanel() {
   });
 
   useEffect(() => {
-    fetchUsers();
-    fetchRolePermissions();
-    fetchActivities();
-  }, []);
+    if (currentUser?.role !== 'SUPER_ADMIN') return;
 
-  const fetchActivities = async () => {
-    try {
-      const res = await fetch('/api/admin/activity', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        setActivities(await res.json());
-      }
-    } catch (error) {
-      console.error(error);
-    }
-  };
-
-  const fetchUsers = async () => {
-    try {
-      const res = await fetch('/api/admin/users', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        setUsers(await res.json());
-      }
-    } catch (error) {
-      console.error(error);
-    } finally {
+    const unsubUsers = subscribeToUsers((data) => {
+      setUsers(data as User[]);
       setLoading(false);
-    }
-  };
+    });
 
-  const fetchRolePermissions = async () => {
-    try {
-      const res = await fetch('/api/admin/role-permissions', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        setRolePermissions(await res.json());
-      }
-    } catch (error) {
-      console.error(error);
-    }
-  };
+    const unsubPerms = subscribeToRolePermissions((data) => {
+      setRolePermissions(data as RolePermission[]);
+    });
+
+    const unsubLogs = subscribeToAllActivityLogs((data) => {
+      setActivities(data);
+    });
+
+    return () => {
+      unsubUsers();
+      unsubPerms();
+      unsubLogs();
+    };
+  }, [currentUser?.role]);
 
   const handlePermissionToggle = async (role: string, permissionId: string) => {
     const rolePerm = rolePermissions.find(rp => rp.role === role);
@@ -90,36 +73,15 @@ export default function AdminPanel() {
       : [...rolePerm.permissions, permissionId];
 
     try {
-      const res = await fetch(`/api/admin/role-permissions/${role}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ permissions: newPermissions }),
-      });
-
-      if (res.ok) {
-        setRolePermissions(prev => prev.map(rp => 
-          rp.role === role ? { ...rp, permissions: newPermissions } : rp
-        ));
-      }
+      await updateRolePermissions(role, newPermissions);
     } catch (error) {
       console.error(error);
     }
   };
 
-  const handleStatusUpdate = async (id: number, status: string) => {
+  const handleStatusUpdate = async (id: string, status: string) => {
     try {
-      const res = await fetch(`/api/admin/users/${id}/status`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ status }),
-      });
-      if (res.ok) fetchUsers();
+      await updateUserStatus(id, status);
     } catch (error) {
       console.error(error);
     }
@@ -127,28 +89,7 @@ export default function AdminPanel() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const url = editingUser ? `/api/admin/users/${editingUser.id}` : '/api/admin/users';
-    const method = editingUser ? 'PUT' : 'POST';
-
-    try {
-      const res = await fetch(url, {
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(formData),
-      });
-
-      if (res.ok) {
-        setIsModalOpen(false);
-        setEditingUser(null);
-        setFormData({ name: '', email: '', password: '', role: 'USER', status: 'PENDING' });
-        fetchUsers();
-      }
-    } catch (error) {
-      console.error(error);
-    }
+    alert('User creation/editing from Admin Panel is currently being implemented for Firebase.');
   };
 
   const openEditModal = (user: User) => {
@@ -280,7 +221,7 @@ export default function AdminPanel() {
                         </button>
                         <select
                           value={u.status}
-                          onChange={(e) => handleStatusUpdate(u.id, e.target.value)}
+                          onChange={(e) => handleStatusUpdate(u.id.toString(), e.target.value)}
                           className="bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100"
                         >
                           <option value="PENDING">PENDING</option>

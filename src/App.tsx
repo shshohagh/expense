@@ -10,6 +10,7 @@ import Profile from './components/Profile';
 import UserActivity from './components/UserActivity';
 import Reports from './components/Reports';
 import BudgetManagement from './components/BudgetManagement';
+import { subscribeToTransactions, getTransactions } from './services/firestoreService';
 import { t, formatCurrency } from './utils/i18n';
 import { 
   LayoutDashboard, 
@@ -33,7 +34,7 @@ import { motion, AnimatePresence } from 'motion/react';
 type View = 'dashboard' | 'transactions' | 'admin' | 'profile' | 'categories' | 'recurring' | 'activity' | 'reports' | 'budgets';
 
 export default function App() {
-  const { isAuthenticated, isLoading, user, logout, token } = useAuth();
+  const { isAuthenticated, isLoading, user, logout } = useAuth();
   const [currentView, setCurrentView] = useState<View>('dashboard');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -45,18 +46,13 @@ export default function App() {
   const currency = user?.currency || 'USD';
 
   const fetchBalance = async () => {
-    if (!token) return;
+    if (!user?.id) return;
     try {
-      const res = await fetch('/api/transactions', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const transactions = await res.json();
-        const activeTransactions = transactions.filter((t: any) => t.status === 'ACTIVE' || !t.status);
-        const income = activeTransactions.filter((t: any) => t.type === 'INCOME').reduce((acc: number, t: any) => acc + t.amount, 0);
-        const expense = activeTransactions.filter((t: any) => t.type === 'EXPENSE').reduce((acc: number, t: any) => acc + t.amount, 0);
-        setTopBalance(income - expense);
-      }
+      const transactions = await getTransactions(user.id.toString());
+      const activeTransactions = transactions.filter((t: any) => t.status === 'ACTIVE' || !t.status);
+      const income = activeTransactions.filter((t: any) => t.type === 'INCOME').reduce((acc: number, t: any) => acc + t.amount, 0);
+      const expense = activeTransactions.filter((t: any) => t.type === 'EXPENSE').reduce((acc: number, t: any) => acc + t.amount, 0);
+      setTopBalance(income - expense);
     } catch (error) {
       console.error(error);
     }

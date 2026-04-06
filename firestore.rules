@@ -1,0 +1,197 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: userId (auth.uid)
+    // Fields:
+    //   - email: string (required)
+    //   - name: string
+    //   - role: string (USER, ADMIN, SUPER_ADMIN)
+    //   - status: string (PENDING, APPROVED, REJECTED, CANCEL)
+    //   - currency: string
+    //   - language: string
+    //   - created_at: timestamp
+    //   - deleted_at: timestamp
+    //
+    // Collection: transactions
+    // Fields:
+    //   - userId: string (required)
+    //   - type: string (INCOME, EXPENSE)
+    //   - amount: number
+    //   - categoryId: string
+    //   - categoryName: string
+    //   - date: string
+    //   - description: string
+    //   - status: string (ACTIVE, INACTIVE)
+    //   - created_at: timestamp
+    //   - deleted_at: timestamp
+    //
+    // Collection: categories
+    // Fields:
+    //   - userId: string (null for global)
+    //   - name: string
+    //   - type: string (INCOME, EXPENSE)
+    //   - deleted_at: timestamp
+    //
+    // Collection: budgets
+    // Fields:
+    //   - userId: string
+    //   - categoryId: string
+    //   - categoryName: string
+    //   - categoryType: string (INCOME, EXPENSE)
+    //   - amount: number
+    //   - period: string (MONTHLY, YEARLY)
+    //   - created_at: timestamp
+    //   - deleted_at: timestamp
+    //
+    // Collection: recurring_transactions
+    // Fields:
+    //   - userId: string
+    //   - type: string (INCOME, EXPENSE)
+    //   - amount: number
+    //   - categoryId: string
+    //   - categoryName: string
+    //   - frequency: string (DAILY, WEEKLY, MONTHLY, YEARLY)
+    //   - startDate: string
+    //   - description: string
+    //   - active: boolean
+    //   - created_at: timestamp
+    //   - deleted_at: timestamp
+    //
+    // Collection: activity_logs
+    // Fields:
+    //   - userId: string
+    //   - userName: string
+    //   - userEmail: string
+    //   - action: string
+    //   - details: string
+    //   - created_at: timestamp
+    //
+    // Collection: role_permissions
+    // Fields:
+    //   - role: string
+    //   - permissions: list<string>
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['ADMIN', 'SUPER_ADMIN'] ||
+          (request.auth.token.email == "shshohagh4@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.userId;
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasOnly(['email', 'name', 'role', 'status', 'currency', 'language', 'created_at', 'deleted_at']) &&
+             data.email is string && data.email.size() > 0 && data.email.size() < 255 &&
+             data.name is string && data.name.size() < 100 &&
+             data.role in ['USER', 'ADMIN', 'SUPER_ADMIN'] &&
+             data.status in ['PENDING', 'APPROVED', 'REJECTED', 'CANCEL'];
+    }
+
+    function isValidTransaction(data) {
+      return data.keys().hasOnly(['userId', 'type', 'amount', 'categoryId', 'categoryName', 'date', 'description', 'status', 'created_at', 'deleted_at']) &&
+             data.userId == request.auth.uid &&
+             data.type in ['INCOME', 'EXPENSE'] &&
+             data.amount is number &&
+             data.date is string &&
+             data.description is string && data.description.size() < 500;
+    }
+
+    function isValidCategory(data) {
+      return data.keys().hasOnly(['userId', 'name', 'type', 'deleted_at']) &&
+             (data.userId == null || data.userId == request.auth.uid) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 50 &&
+             data.type in ['INCOME', 'EXPENSE'];
+    }
+
+    function isValidBudget(data) {
+      return data.keys().hasOnly(['userId', 'categoryId', 'categoryName', 'categoryType', 'amount', 'period', 'created_at', 'deleted_at']) &&
+             data.userId == request.auth.uid &&
+             data.amount is number &&
+             data.period in ['MONTHLY', 'YEARLY'];
+    }
+
+    function isValidRecurring(data) {
+      return data.keys().hasOnly(['userId', 'type', 'amount', 'categoryId', 'categoryName', 'frequency', 'startDate', 'description', 'active', 'created_at', 'deleted_at', 'updated_at']) &&
+             data.userId == request.auth.uid &&
+             data.type in ['INCOME', 'EXPENSE'] &&
+             data.amount is number &&
+             data.frequency in ['DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY'] &&
+             data.active is bool;
+    }
+
+    function isValidActivity(data) {
+      return data.keys().hasOnly(['userId', 'userName', 'userEmail', 'action', 'details', 'created_at']) &&
+             data.userId == request.auth.uid &&
+             data.action is string &&
+             data.details is string && data.details.size() < 1000;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isAuthenticated() && isValidUser(request.resource.data) && (isOwner(userId) || isAdmin());
+      allow update: if isAuthenticated() && isValidUser(request.resource.data) && (isOwner(userId) || isAdmin());
+    }
+
+    match /transactions/{transactionId} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidTransaction(request.resource.data);
+      allow update: if isAuthenticated() && isValidTransaction(request.resource.data) && (isDocOwner() || isAdmin());
+      allow delete: if isAuthenticated() && (isDocOwner() || isAdmin());
+    }
+
+    match /categories/{categoryId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidCategory(request.resource.data);
+      allow update: if isAuthenticated() && isValidCategory(request.resource.data) && (resource.data.userId == request.auth.uid || isAdmin());
+      allow delete: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+    }
+
+    match /budgets/{budgetId} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidBudget(request.resource.data);
+      allow update: if isAuthenticated() && isValidBudget(request.resource.data) && (isDocOwner() || isAdmin());
+      allow delete: if isAuthenticated() && (isDocOwner() || isAdmin());
+    }
+
+    match /recurring_transactions/{rtId} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidRecurring(request.resource.data);
+      allow update: if isAuthenticated() && isValidRecurring(request.resource.data) && (isDocOwner() || isAdmin());
+      allow delete: if isAuthenticated() && (isDocOwner() || isAdmin());
+    }
+
+    match /activity_logs/{logId} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && isValidActivity(request.resource.data);
+    }
+
+    match /role_permissions/{role} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+  }
+}

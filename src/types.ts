@@ -1,5 +1,5 @@
 export interface User {
-  id: number;
+  id: string | number;
   email: string;
   name: string;
   role: 'USER' | 'SUPER_ADMIN' | 'ADMIN';
@@ -11,11 +11,11 @@ export interface User {
 }
 
 export interface Transaction {
-  id: number;
-  userId: number;
+  id: string | number;
+  userId: string | number;
   type: 'INCOME' | 'EXPENSE';
   amount: number;
-  categoryId: number;
+  categoryId: string | number;
   categoryName?: string;
   date: string;
   description: string;
@@ -24,8 +24,8 @@ export interface Transaction {
 }
 
 export interface Category {
-  id: number;
-  userId: number | null;
+  id: string | number;
+  userId: string | number | null;
   name: string;
   type: 'INCOME' | 'EXPENSE';
 }
@@ -38,9 +38,9 @@ export interface AuthState {
 }
 
 export interface Budget {
-  id: number;
-  userId: number;
-  categoryId: number;
+  id: string | number;
+  userId: string | number;
+  categoryId: string | number;
   categoryName?: string;
   categoryType?: 'INCOME' | 'EXPENSE';
   amount: number;
