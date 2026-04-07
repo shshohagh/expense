@@ -49,13 +49,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             });
           }
 
-          const token = await firebaseUser.getIdToken();
-          setState({
-            user: userData,
-            token,
-            isAuthenticated: true,
-            isLoading: false,
-          });
+          if (userData.status === 'APPROVED') {
+            const token = await firebaseUser.getIdToken();
+            setState({
+              user: userData,
+              token,
+              isAuthenticated: true,
+              isLoading: false,
+              isPendingApproval: false
+            });
+          } else {
+            setState({
+              user: userData,
+              token: null,
+              isAuthenticated: false,
+              isLoading: false,
+              isPendingApproval: true
+            });
+          }
         } catch (error) {
           console.error('Error fetching user profile:', error);
           setState(prev => ({ ...prev, isLoading: false }));

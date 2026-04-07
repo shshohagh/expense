@@ -12,7 +12,7 @@ import {
 } from 'firebase/auth';
 
 export default function Auth({ theme, toggleTheme }: { theme?: 'light' | 'dark', toggleTheme?: () => void }) {
-  const { login } = useAuth();
+  const { login, isPendingApproval, logout } = useAuth();
   const [isLogin, setIsLogin] = useState(true);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -146,6 +146,29 @@ export default function Auth({ theme, toggleTheme }: { theme?: 'light' | 'dark',
           </motion.div>
         )}
 
+        {isPendingApproval && (
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="p-6 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 rounded-[30px] space-y-4"
+          >
+            <div className="flex items-center gap-3 text-amber-600 dark:text-amber-500">
+              <AlertCircle size={24} />
+              <p className="text-lg font-bold">Account Pending Approval</p>
+            </div>
+            <p className="text-sm text-amber-700 dark:text-amber-400 leading-relaxed">
+              Your account has been created successfully but is currently waiting for administrator approval. 
+              You will be able to access the dashboard once your account is approved.
+            </p>
+            <button
+              onClick={logout}
+              className="w-full py-3 bg-amber-600 text-white rounded-2xl font-bold text-sm hover:bg-amber-700 transition-colors"
+            >
+              Sign Out
+            </button>
+          </motion.div>
+        )}
+
         {message && (
           <motion.div 
             initial={{ opacity: 0, scale: 0.95 }}
@@ -157,7 +180,7 @@ export default function Auth({ theme, toggleTheme }: { theme?: 'light' | 'dark',
           </motion.div>
         )}
 
-        {!isForgotPassword && (
+        {!isForgotPassword && !isPendingApproval && (
           <div className="space-y-6">
             <button
               onClick={handleGoogleAuth}
@@ -191,8 +214,9 @@ export default function Auth({ theme, toggleTheme }: { theme?: 'light' | 'dark',
           </div>
         )}
 
-        <form onSubmit={isForgotPassword ? handleForgotPassword : handleSubmit} className="space-y-6">
-          {!isLogin && !isForgotPassword && (
+        {!isPendingApproval && (
+          <form onSubmit={isForgotPassword ? handleForgotPassword : handleSubmit} className="space-y-6">
+            {!isLogin && !isForgotPassword && (
             <div className="space-y-3">
               <label className="text-sm font-bold text-zinc-400 dark:text-zinc-500 ml-1">Full Name</label>
               <input
@@ -262,7 +286,9 @@ export default function Auth({ theme, toggleTheme }: { theme?: 'light' | 'dark',
             )}
           </button>
         </form>
+      )}
 
+      {!isPendingApproval && (
         <div className="text-center">
           {isForgotPassword ? (
             <button
@@ -280,6 +306,7 @@ export default function Auth({ theme, toggleTheme }: { theme?: 'light' | 'dark',
             </button>
           )}
         </div>
+      )}
       </motion.div>
     </div>
   );
