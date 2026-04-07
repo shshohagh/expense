@@ -100,7 +100,7 @@ service cloud.firestore {
     }
 
     function isValidUser(data) {
-      return data.keys().hasOnly(['email', 'name', 'role', 'status', 'currency', 'language', 'created_at', 'deleted_at']) &&
+      return data.keys().hasOnly(['id', 'email', 'name', 'role', 'status', 'currency', 'language', 'permissions', 'created_at', 'deleted_at']) &&
              data.email is string && data.email.size() > 0 && data.email.size() < 255 &&
              data.name is string && data.name.size() < 100 &&
              data.role in ['USER', 'ADMIN', 'SUPER_ADMIN'] &&

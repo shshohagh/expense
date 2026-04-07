@@ -39,7 +39,23 @@ export default function Auth() {
       }
     } catch (err: any) {
       console.error('Auth error:', err);
-      setError(err.message || 'An error occurred. Please try again.');
+      let errorMessage = 'An error occurred. Please try again.';
+      
+      if (err.code === 'auth/email-already-in-use') {
+        errorMessage = 'This email is already registered. Please sign in instead.';
+      } else if (err.code === 'auth/invalid-email') {
+        errorMessage = 'Please enter a valid email address.';
+      } else if (err.code === 'auth/weak-password') {
+        errorMessage = 'Password should be at least 6 characters.';
+      } else if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+        errorMessage = 'Invalid email or password.';
+      } else if (err.code === 'auth/too-many-requests') {
+        errorMessage = 'Too many failed attempts. Please try again later.';
+      } else if (err.code === 'auth/operation-not-allowed') {
+        errorMessage = 'This sign-in method is not enabled. Please enable Email/Password in the Firebase Console.';
+      }
+      
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -53,7 +69,13 @@ export default function Auth() {
       await signInWithPopup(auth, provider);
     } catch (err: any) {
       console.error('Google auth error:', err);
-      setError(err.message || 'Google authentication failed.');
+      let errorMessage = 'Google authentication failed.';
+      if (err.code === 'auth/popup-closed-by-user') {
+        errorMessage = 'Sign-in popup was closed before completion.';
+      } else if (err.code === 'auth/cancelled-by-user') {
+        errorMessage = 'Authentication was cancelled.';
+      }
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -71,7 +93,13 @@ export default function Auth() {
       setIsForgotPassword(false);
     } catch (err: any) {
       console.error('Reset password error:', err);
-      setError(err.message || 'Failed to send reset email. Please try again.');
+      let errorMessage = 'Failed to send reset email. Please try again.';
+      if (err.code === 'auth/user-not-found') {
+        errorMessage = 'No user found with this email address.';
+      } else if (err.code === 'auth/invalid-email') {
+        errorMessage = 'Please enter a valid email address.';
+      }
+      setError(errorMessage);
     } finally {
       setLoading(false);
     }
