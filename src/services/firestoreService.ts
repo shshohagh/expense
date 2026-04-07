@@ -359,6 +359,7 @@ export const loadDemoData = async (userId: string) => {
       description: 'Monthly Rent (Recurring)',
       frequency: 'MONTHLY',
       startDate: new Date().toISOString().split('T')[0],
+      nextDate: new Date().toISOString().split('T')[0],
       active: true,
       userId,
       isDemo: true,

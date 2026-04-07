@@ -136,7 +136,7 @@ service cloud.firestore {
     }
 
     function isValidRecurring(data) {
-      return data.keys().hasOnly(['userId', 'type', 'amount', 'categoryId', 'categoryName', 'frequency', 'startDate', 'description', 'active', 'created_at', 'deleted_at', 'updated_at', 'isDemo']) &&
+      return data.keys().hasOnly(['userId', 'type', 'amount', 'categoryId', 'categoryName', 'frequency', 'startDate', 'nextDate', 'description', 'active', 'created_at', 'deleted_at', 'updated_at', 'isDemo']) &&
              data.userId == request.auth.uid &&
              data.type in ['INCOME', 'EXPENSE', 'BUDGET'] &&
              data.amount is number &&
