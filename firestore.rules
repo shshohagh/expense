@@ -110,7 +110,7 @@ service cloud.firestore {
     function isValidTransaction(data) {
       return data.keys().hasOnly(['userId', 'type', 'amount', 'categoryId', 'categoryName', 'date', 'description', 'status', 'created_at', 'deleted_at']) &&
              data.userId == request.auth.uid &&
-             data.type in ['INCOME', 'EXPENSE'] &&
+             data.type in ['INCOME', 'EXPENSE', 'BUDGET'] &&
              data.amount is number &&
              data.date is string &&
              data.description is string && data.description.size() < 500;
@@ -120,7 +120,7 @@ service cloud.firestore {
       return data.keys().hasOnly(['userId', 'name', 'type', 'deleted_at']) &&
              ((data.userId == null && isAdmin()) || data.userId == request.auth.uid) &&
              data.name is string && data.name.size() > 0 && data.name.size() < 50 &&
-             data.type in ['INCOME', 'EXPENSE'];
+             data.type in ['INCOME', 'EXPENSE', 'BUDGET'];
     }
 
     function isValidBudget(data) {
@@ -133,7 +133,7 @@ service cloud.firestore {
     function isValidRecurring(data) {
       return data.keys().hasOnly(['userId', 'type', 'amount', 'categoryId', 'categoryName', 'frequency', 'startDate', 'description', 'active', 'created_at', 'deleted_at', 'updated_at']) &&
              data.userId == request.auth.uid &&
-             data.type in ['INCOME', 'EXPENSE'] &&
+             data.type in ['INCOME', 'EXPENSE', 'BUDGET'] &&
              data.amount is number &&
              data.frequency in ['DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY'] &&
              data.active is bool;

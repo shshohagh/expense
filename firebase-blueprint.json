@@ -22,7 +22,7 @@
       "type": "object",
       "properties": {
         "userId": { "type": "string" },
-        "type": { "type": "string", "enum": ["INCOME", "EXPENSE"] },
+        "type": { "type": "string", "enum": ["INCOME", "EXPENSE", "BUDGET"] },
         "amount": { "type": "number" },
         "categoryId": { "type": "string" },
         "categoryName": { "type": "string" },
@@ -41,7 +41,7 @@
       "properties": {
         "userId": { "type": "string" },
         "name": { "type": "string" },
-        "type": { "type": "string", "enum": ["INCOME", "EXPENSE"] },
+        "type": { "type": "string", "enum": ["INCOME", "EXPENSE", "BUDGET"] },
         "deleted_at": { "type": "string", "format": "date-time" }
       },
       "required": ["name", "type"]
@@ -54,7 +54,7 @@
         "userId": { "type": "string" },
         "categoryId": { "type": "string" },
         "categoryName": { "type": "string" },
-        "categoryType": { "type": "string", "enum": ["INCOME", "EXPENSE"] },
+        "categoryType": { "type": "string", "enum": ["INCOME", "EXPENSE", "BUDGET"] },
         "amount": { "type": "number" },
         "period": { "type": "string", "enum": ["MONTHLY", "YEARLY"] },
         "created_at": { "type": "string", "format": "date-time" },

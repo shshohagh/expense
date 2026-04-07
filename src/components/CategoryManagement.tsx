@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { Plus, Edit2, Trash2, X, Tag, Database, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Plus, Edit2, Trash2, X, Tag, Database, AlertCircle, CheckCircle2, Download } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import * as XLSX from 'xlsx';
 import { 
   subscribeToCategories, 
   addCategory, 
@@ -39,7 +40,7 @@ export default function CategoryManagement() {
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
   const [formData, setFormData] = useState({
     name: '',
-    type: 'EXPENSE' as 'INCOME' | 'EXPENSE'
+    type: 'EXPENSE' as 'INCOME' | 'EXPENSE' | 'BUDGET'
   });
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -137,23 +138,65 @@ export default function CategoryManagement() {
     setIsModalOpen(true);
   };
 
+  const handleExport = (format: 'csv' | 'xlsx') => {
+    const dataToExport = categories.map(c => ({
+      Name: c.name,
+      Type: c.type,
+      Scope: c.userId === null ? 'Global' : 'Personal'
+    }));
+
+    if (format === 'csv') {
+      const headers = ['Name', 'Type', 'Scope'].join(',');
+      const rows = dataToExport.map(row => [row.Name, row.Type, row.Scope].join(','));
+      const csvContent = [headers, ...rows].join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', `categories_export.csv`);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } else {
+      const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Categories");
+      XLSX.writeFile(workbook, 'categories_export.xlsx');
+    }
+  };
+
   const isAdmin = user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN';
 
   return (
     <div className="space-y-6">
       <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Category Management</h1>
-          <p className="text-muted-foreground">Manage income and expense categories.</p>
+          <h1 className="text-3xl font-bold tracking-tight">Category</h1>
+          <p className="text-muted-foreground">Manage categories.</p>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={() => handleExport('csv')}
+            className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-sm font-medium hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors shadow-sm"
+          >
+            <Download size={18} />
+            CSV
+          </button>
+          <button
+            onClick={() => handleExport('xlsx')}
+            className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-sm font-medium hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors shadow-sm"
+          >
+            <Download size={18} />
+            Excel
+          </button>
           {isAdmin && categories.filter(c => c.userId === null).length === 0 && (
             <button
               onClick={handleSeed}
               className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl font-medium hover:bg-emerald-700 transition-colors"
             >
               <Database size={18} />
-              Seed Defaults
+              Seed
             </button>
           )}
           <button
@@ -162,10 +205,10 @@ export default function CategoryManagement() {
               setFormData({ name: '', type: 'EXPENSE' });
               setIsModalOpen(true);
             }}
-            className="flex items-center gap-2 px-4 py-2 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-xl font-medium hover:opacity-90 transition-opacity"
+            className="flex items-center gap-2 px-4 py-2 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-xl font-medium hover:opacity-90 transition-opacity shadow-sm"
           >
             <Plus size={18} />
-            Add Category
+            Add
           </button>
         </div>
       </header>
@@ -214,6 +257,16 @@ export default function CategoryManagement() {
           onEdit={openEditModal}
           onDelete={handleDelete}
           type="EXPENSE"
+          currentUserId={user?.id?.toString()}
+          isAdmin={isAdmin}
+        />
+        {/* Budget Categories */}
+        <CategorySection 
+          title="Budget Categories" 
+          categories={categories.filter(c => c.type === 'BUDGET')} 
+          onEdit={openEditModal}
+          onDelete={handleDelete}
+          type="BUDGET"
           currentUserId={user?.id?.toString()}
           isAdmin={isAdmin}
         />
@@ -283,11 +336,12 @@ export default function CategoryManagement() {
                   <label className="text-sm font-medium">Type</label>
                   <select
                     value={formData.type}
-                    onChange={(e) => setFormData({ ...formData, type: e.target.value as 'INCOME' | 'EXPENSE' })}
+                    onChange={(e) => setFormData({ ...formData, type: e.target.value as 'INCOME' | 'EXPENSE' | 'BUDGET' })}
                     className="w-full px-4 py-2 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100"
                   >
                     <option value="INCOME">INCOME</option>
                     <option value="EXPENSE">EXPENSE</option>
+                    <option value="BUDGET">BUDGET</option>
                   </select>
                 </div>
                 <div className="pt-4">
@@ -312,14 +366,18 @@ function CategorySection({ title, categories, onEdit, onDelete, type, currentUse
   categories: Category[], 
   onEdit: (c: Category) => void, 
   onDelete: (id: string) => void,
-  type: 'INCOME' | 'EXPENSE',
+  type: 'INCOME' | 'EXPENSE' | 'BUDGET',
   currentUserId?: string,
   isAdmin?: boolean
 }) {
   return (
     <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden shadow-sm">
       <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-800/50">
-        <h3 className={`text-sm font-bold uppercase tracking-wider ${type === 'INCOME' ? 'text-emerald-600' : 'text-rose-600'}`}>
+        <h3 className={`text-sm font-bold uppercase tracking-wider ${
+          type === 'INCOME' ? 'text-emerald-600' : 
+          type === 'EXPENSE' ? 'text-rose-600' : 
+          'text-blue-600'
+        }`}>
           {title}
         </h3>
       </div>
@@ -337,7 +395,9 @@ function CategorySection({ title, categories, onEdit, onDelete, type, currentUse
               <div key={cat.id} className="p-4 flex items-center justify-between hover:bg-zinc-50/50 dark:hover:bg-zinc-800/50 transition-colors">
                 <div className="flex items-center gap-3">
                   <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
-                    type === 'INCOME' ? 'bg-emerald-100 text-emerald-600' : 'bg-rose-100 text-rose-600'
+                    type === 'INCOME' ? 'bg-emerald-100 text-emerald-600' : 
+                    type === 'EXPENSE' ? 'bg-rose-100 text-rose-600' : 
+                    'bg-blue-100 text-blue-600'
                   }`}>
                     <Tag size={16} />
                   </div>
