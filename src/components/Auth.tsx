@@ -74,6 +74,8 @@ export default function Auth({ theme, toggleTheme }: { theme?: 'light' | 'dark',
         errorMessage = 'Sign-in popup was closed before completion.';
       } else if (err.code === 'auth/cancelled-by-user') {
         errorMessage = 'Authentication was cancelled.';
+      } else if (err.code === 'auth/unauthorized-domain') {
+        errorMessage = 'This domain is not authorized for Google Sign-in. Please add it to the "Authorized domains" list in your Firebase Console (Authentication > Settings).';
       }
       setError(errorMessage);
     } finally {
