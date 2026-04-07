@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { formatCurrency } from '../utils/i18n';
-import { Plus, Edit2, Trash2, X, RefreshCw, Calendar, Tag, ArrowUpCircle, ArrowDownCircle } from 'lucide-react';
+import { Plus, Edit2, Trash2, X, RefreshCw, Calendar, Tag, ArrowUpCircle, ArrowDownCircle, Download, FileSpreadsheet, FileText, Search, Filter } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import * as XLSX from 'xlsx';
 import { 
   subscribeToRecurringTransactions, 
   subscribeToCategories,
@@ -40,6 +41,11 @@ export default function RecurringTransactions() {
   const [itemToDelete, setItemToDelete] = useState<string | null>(null);
   const [editingRT, setEditingRT] = useState<RecurringTransaction | null>(null);
   
+  // Filters
+  const [filterType, setFilterType] = useState<'ALL' | 'INCOME' | 'EXPENSE'>('ALL');
+  const [filterCategory, setFilterCategory] = useState<string>('ALL');
+  const [searchTerm, setSearchTerm] = useState('');
+
   const [formData, setFormData] = useState({
     type: 'EXPENSE' as 'INCOME' | 'EXPENSE',
     amount: '',
@@ -144,6 +150,57 @@ export default function RecurringTransactions() {
   const lang = user?.language || 'en';
   const currency = user?.currency || 'USD';
 
+  const filteredRecurring = recurring.filter(rt => {
+    const matchesType = filterType === 'ALL' || rt.type === filterType;
+    const matchesCategory = filterCategory === 'ALL' || rt.categoryId === filterCategory;
+    const matchesSearch = rt.description.toLowerCase().includes(searchTerm.toLowerCase()) || 
+                         rt.categoryName?.toLowerCase().includes(searchTerm.toLowerCase());
+    return matchesType && matchesCategory && matchesSearch;
+  });
+
+  const exportToCSV = () => {
+    const headers = ['Description', 'Type', 'Amount', 'Category', 'Frequency', 'Start Date', 'Next Date', 'Status'];
+    const data = filteredRecurring.map(rt => [
+      rt.description || 'Recurring',
+      rt.type,
+      rt.amount,
+      rt.categoryName || 'Unknown',
+      rt.frequency,
+      rt.startDate,
+      rt.nextDate,
+      rt.active ? 'Active' : 'Paused'
+    ]);
+
+    const csvContent = [headers, ...data].map(e => e.join(',')).join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `recurring_transactions_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const exportToExcel = () => {
+    const data = filteredRecurring.map(rt => ({
+      Description: rt.description || 'Recurring',
+      Type: rt.type,
+      Amount: rt.amount,
+      Category: rt.categoryName || 'Unknown',
+      Frequency: rt.frequency,
+      'Start Date': rt.startDate,
+      'Next Date': rt.nextDate,
+      Status: rt.active ? 'Active' : 'Paused'
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(data);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Recurring Transactions');
+    XLSX.writeFile(workbook, `recurring_transactions_${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -151,29 +208,90 @@ export default function RecurringTransactions() {
           <h1 className="text-3xl font-bold tracking-tight">Recurring Transactions</h1>
           <p className="text-muted-foreground">Automate your regular income and expenses.</p>
         </div>
-        <button
-          onClick={() => {
-            setEditingRT(null);
-            resetForm();
-            setIsModalOpen(true);
-          }}
-          className="flex items-center gap-2 px-4 py-2 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-xl font-medium hover:opacity-90 transition-opacity"
-        >
-          <Plus size={18} /> Add 
-        </button>
+        <div className="flex items-center gap-2">
+          <div className="flex items-center bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl overflow-hidden">
+            <button
+              onClick={exportToCSV}
+              className="p-2.5 text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors border-r border-zinc-200 dark:border-zinc-800"
+              title="Export to CSV"
+            >
+              <FileText size={18} />
+            </button>
+            <button
+              onClick={exportToExcel}
+              className="p-2.5 text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
+              title="Export to Excel"
+            >
+              <FileSpreadsheet size={18} />
+            </button>
+          </div>
+          <button
+            onClick={() => {
+              setEditingRT(null);
+              resetForm();
+              setIsModalOpen(true);
+            }}
+            className="flex items-center gap-2 px-4 py-2 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-xl font-medium hover:opacity-90 transition-opacity"
+          >
+            <Plus size={18} /> Add 
+          </button>
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={18} />
+          <input
+            type="text"
+            placeholder="Search recurring..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full pl-10 pr-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100"
+          />
+        </div>
+        <div className="relative">
+          <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={18} />
+          <select
+            value={filterType}
+            onChange={(e) => setFilterType(e.target.value as any)}
+            className="w-full pl-10 pr-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100 appearance-none"
+          >
+            <option value="ALL">All Types</option>
+            <option value="INCOME">Income</option>
+            <option value="EXPENSE">Expense</option>
+          </select>
+        </div>
+        <div className="relative">
+          <Tag className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={18} />
+          <select
+            value={filterCategory}
+            onChange={(e) => setFilterCategory(e.target.value)}
+            className="w-full pl-10 pr-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100 appearance-none"
+          >
+            <option value="ALL">All Categories</option>
+            {categories.map(cat => (
+              <option key={cat.id} value={cat.id}>{cat.name}</option>
+            ))}
+          </select>
+        </div>
+        <div className="flex items-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 rounded-xl text-sm font-medium text-zinc-500">
+          <RefreshCw size={16} />
+          <span>{filteredRecurring.length} Transactions</span>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-4">
         {loading ? (
           <div className="p-12 text-center text-muted-foreground">Loading...</div>
-        ) : recurring.length === 0 ? (
+        ) : filteredRecurring.length === 0 ? (
           <div className="p-12 text-center bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 border-dashed">
             <RefreshCw size={48} className="mx-auto mb-4 text-zinc-300" />
-            <p className="text-lg font-medium">No recurring transactions yet</p>
-            <p className="text-sm text-muted-foreground">Add your rent, subscriptions, or salary to automate them.</p>
+            <p className="text-lg font-medium">No recurring transactions found</p>
+            <p className="text-sm text-muted-foreground">Try adjusting your filters or add a new recurring transaction.</p>
           </div>
         ) : (
-          recurring.map((rt) => (
+          filteredRecurring.map((rt) => (
             <motion.div
               key={rt.id}
               initial={{ opacity: 0, y: 10 }}

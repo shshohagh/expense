@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { User } from '../types';
-import { Shield, User as UserIcon, Plus, Edit2, X, Eye, EyeOff, Lock, Check, AlertCircle } from 'lucide-react';
+import { Shield, User as UserIcon, Plus, Edit2, X, Eye, EyeOff, Lock, Check, AlertCircle, FileText, FileSpreadsheet } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import * as XLSX from 'xlsx';
 import { 
   subscribeToUsers, 
   updateUserStatus, 
@@ -104,6 +105,43 @@ export default function AdminPanel() {
     setIsModalOpen(true);
   };
 
+  const exportUsersCSV = () => {
+    const headers = ['Name', 'Email', 'Role', 'Status', 'Created At'];
+    const data = users.map(u => [
+      u.name,
+      u.email,
+      u.role,
+      u.status,
+      u.created_at ? new Date(u.created_at).toLocaleString() : 'N/A'
+    ]);
+
+    const csvContent = [headers, ...data].map(e => e.join(',')).join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `users_export_${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const exportUsersExcel = () => {
+    const data = users.map(u => ({
+      Name: u.name,
+      Email: u.email,
+      Role: u.role,
+      Status: u.status,
+      'Created At': u.created_at ? new Date(u.created_at).toLocaleString() : 'N/A'
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(data);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Users');
+    XLSX.writeFile(workbook, `users_export_${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
+
   if (currentUser?.role !== 'SUPER_ADMIN') {
     return <div className="p-8 text-center">Access Denied.</div>;
   }
@@ -116,19 +154,39 @@ export default function AdminPanel() {
             <h1 className="text-3xl font-bold tracking-tight">Admin Dashboard</h1>
             <p className="text-muted-foreground">Manage user accounts and system permissions.</p>
           </div>
-          {activeTab === 'users' && (
-            <button
-              onClick={() => {
-                setEditingUser(null);
-                setFormData({ name: '', email: '', password: '', role: 'USER', status: 'PENDING' });
-                setIsModalOpen(true);
-              }}
-              className="flex items-center gap-2 px-4 py-2 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-xl font-medium hover:opacity-90 transition-opacity"
-            >
-              <Plus size={18} />
-              Add User
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {activeTab === 'users' && (
+              <>
+                <div className="flex items-center bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl overflow-hidden mr-2">
+                  <button
+                    onClick={exportUsersCSV}
+                    className="p-2.5 text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors border-r border-zinc-200 dark:border-zinc-800"
+                    title="Export Users to CSV"
+                  >
+                    <FileText size={18} />
+                  </button>
+                  <button
+                    onClick={exportUsersExcel}
+                    className="p-2.5 text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
+                    title="Export Users to Excel"
+                  >
+                    <FileSpreadsheet size={18} />
+                  </button>
+                </div>
+                <button
+                  onClick={() => {
+                    setEditingUser(null);
+                    setFormData({ name: '', email: '', password: '', role: 'USER', status: 'PENDING' });
+                    setIsModalOpen(true);
+                  }}
+                  className="flex items-center gap-2 px-4 py-2 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-xl font-medium hover:opacity-90 transition-opacity"
+                >
+                  <Plus size={18} />
+                  Add User
+                </button>
+              </>
+            )}
+          </div>
         </div>
 
         <div className="flex gap-1 p-1 bg-zinc-100 dark:bg-zinc-800/50 rounded-2xl w-fit mb-8">
