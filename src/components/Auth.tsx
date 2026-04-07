@@ -106,14 +106,14 @@ export default function Auth() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 bg-black">
+    <div className="min-h-screen flex items-center justify-center p-4 bg-zinc-50 dark:bg-black transition-colors duration-300">
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="w-full max-w-md space-y-8 p-10 bg-[#121212] rounded-[40px] border border-zinc-800/50 shadow-2xl"
+        className="w-full max-w-md space-y-8 p-10 bg-white dark:bg-[#121212] rounded-[40px] border border-zinc-200 dark:border-zinc-800/50 shadow-2xl transition-colors duration-300"
       >
         <div className="text-center space-y-3">
-          <h1 className="text-4xl font-extrabold tracking-tight text-white">
+          <h1 className="text-4xl font-extrabold tracking-tight text-zinc-900 dark:text-white">
             {isForgotPassword ? 'Reset Password' : isLogin ? 'Welcome Back' : 'Create Account'}
           </h1>
           <p className="text-zinc-500 text-lg">
@@ -129,7 +129,7 @@ export default function Auth() {
           <motion.div 
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="p-4 bg-rose-900/20 border border-rose-800/50 rounded-2xl flex items-center gap-3 text-rose-500"
+            className="p-4 bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800/50 rounded-2xl flex items-center gap-3 text-rose-600 dark:text-rose-500"
           >
             <AlertCircle size={20} />
             <p className="text-sm font-medium">{error}</p>
@@ -140,7 +140,7 @@ export default function Auth() {
           <motion.div 
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="p-4 bg-emerald-900/20 border border-emerald-800/50 rounded-2xl flex items-center gap-3 text-emerald-500"
+            className="p-4 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800/50 rounded-2xl flex items-center gap-3 text-emerald-600 dark:text-emerald-500"
           >
             <CheckCircle2 size={20} />
             <p className="text-sm font-medium">{message}</p>
@@ -151,7 +151,7 @@ export default function Auth() {
           <div className="space-y-6">
             <button
               onClick={handleGoogleAuth}
-              className="w-full py-4 bg-transparent border border-zinc-800 rounded-2xl font-semibold flex items-center justify-center gap-3 text-zinc-400 hover:bg-zinc-800/50 hover:text-white transition-all"
+              className="w-full py-4 bg-transparent border border-zinc-200 dark:border-zinc-800 rounded-2xl font-semibold flex items-center justify-center gap-3 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800/50 hover:text-zinc-900 dark:hover:text-white transition-all"
             >
               <svg className="w-6 h-6" viewBox="0 0 24 24">
                 <path
@@ -175,8 +175,8 @@ export default function Auth() {
             </button>
 
             <div className="relative flex items-center justify-center">
-              <span className="absolute px-4 bg-[#121212] text-[10px] text-zinc-600 font-bold uppercase tracking-[0.2em]">Or use email</span>
-              <div className="w-full h-[1px] bg-zinc-800/50"></div>
+              <span className="absolute px-4 bg-white dark:bg-[#121212] text-[10px] text-zinc-400 dark:text-zinc-600 font-bold uppercase tracking-[0.2em] transition-colors duration-300">Or use email</span>
+              <div className="w-full h-[1px] bg-zinc-200 dark:bg-zinc-800/50 transition-colors duration-300"></div>
             </div>
           </div>
         )}
@@ -184,37 +184,37 @@ export default function Auth() {
         <form onSubmit={isForgotPassword ? handleForgotPassword : handleSubmit} className="space-y-6">
           {!isLogin && !isForgotPassword && (
             <div className="space-y-3">
-              <label className="text-sm font-bold text-zinc-500 ml-1">Full Name</label>
+              <label className="text-sm font-bold text-zinc-400 dark:text-zinc-500 ml-1">Full Name</label>
               <input
                 type="text"
                 required
                 value={formData.name}
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                className="w-full px-5 py-4 bg-zinc-900/50 border border-zinc-800 rounded-2xl text-white placeholder:text-zinc-700 focus:outline-none focus:border-zinc-600 transition-all"
+                className="w-full px-5 py-4 bg-zinc-100 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-2xl text-zinc-900 dark:text-white placeholder:text-zinc-400 dark:placeholder:text-zinc-700 focus:outline-none focus:border-zinc-400 dark:focus:border-zinc-600 transition-all"
                 placeholder="John Doe"
               />
             </div>
           )}
           <div className="space-y-3">
-            <label className="text-sm font-bold text-zinc-500 ml-1">Email Address</label>
+            <label className="text-sm font-bold text-zinc-400 dark:text-zinc-500 ml-1">Email Address</label>
             <input
               type="email"
               required
               value={formData.email}
               onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              className="w-full px-5 py-4 bg-zinc-900/50 border border-zinc-800 rounded-2xl text-white placeholder:text-zinc-700 focus:outline-none focus:border-zinc-600 transition-all"
+              className="w-full px-5 py-4 bg-zinc-100 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-2xl text-zinc-900 dark:text-white placeholder:text-zinc-400 dark:placeholder:text-zinc-700 focus:outline-none focus:border-zinc-400 dark:focus:border-zinc-600 transition-all"
               placeholder="name@example.com"
             />
           </div>
           {!isForgotPassword && (
             <div className="space-y-3">
               <div className="flex items-center justify-between ml-1">
-                <label className="text-sm font-bold text-zinc-500">Password</label>
+                <label className="text-sm font-bold text-zinc-400 dark:text-zinc-500">Password</label>
                 {isLogin && (
                   <button
                     type="button"
                     onClick={() => setIsForgotPassword(true)}
-                    className="text-xs font-bold text-zinc-600 hover:text-zinc-400 transition-colors"
+                    className="text-xs font-bold text-zinc-400 dark:text-zinc-600 hover:text-zinc-600 dark:hover:text-zinc-400 transition-colors"
                   >
                     Forgot password?
                   </button>
@@ -226,13 +226,13 @@ export default function Auth() {
                   required
                   value={formData.password}
                   onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                  className="w-full px-5 py-4 bg-zinc-900/50 border border-zinc-800 rounded-2xl text-white placeholder:text-zinc-700 focus:outline-none focus:border-zinc-600 transition-all pr-14"
+                  className="w-full px-5 py-4 bg-zinc-100 dark:bg-zinc-900/50 border border-zinc-200 dark:border-zinc-800 rounded-2xl text-zinc-900 dark:text-white placeholder:text-zinc-400 dark:placeholder:text-zinc-700 focus:outline-none focus:border-zinc-400 dark:focus:border-zinc-600 transition-all pr-14"
                   placeholder="••••••••"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-5 top-1/2 -translate-y-1/2 text-zinc-600 hover:text-zinc-400 transition-colors"
+                  className="absolute right-5 top-1/2 -translate-y-1/2 text-zinc-400 dark:text-zinc-600 hover:text-zinc-600 dark:hover:text-zinc-400 transition-colors"
                 >
                   {showPassword ? <EyeOff size={22} /> : <Eye size={22} />}
                 </button>
@@ -243,7 +243,7 @@ export default function Auth() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-4 bg-zinc-100 text-black rounded-[20px] font-bold text-lg hover:bg-white transition-all flex items-center justify-center gap-3 disabled:opacity-50"
+            className="w-full py-4 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-black rounded-[20px] font-bold text-lg hover:bg-black dark:hover:bg-white transition-all flex items-center justify-center gap-3 disabled:opacity-50"
           >
             {loading ? 'Processing...' : isForgotPassword ? 'Send Reset Link' : isLogin ? (
               <><LogIn size={22} /> Sign In</>
@@ -257,14 +257,14 @@ export default function Auth() {
           {isForgotPassword ? (
             <button
               onClick={() => setIsForgotPassword(false)}
-              className="text-sm font-bold text-zinc-600 hover:text-zinc-400 transition-colors"
+              className="text-sm font-bold text-zinc-400 dark:text-zinc-600 hover:text-zinc-600 dark:hover:text-zinc-400 transition-colors"
             >
               Back to Sign In
             </button>
           ) : (
             <button
               onClick={() => setIsLogin(!isLogin)}
-              className="text-sm font-bold text-zinc-600 hover:text-zinc-400 transition-colors"
+              className="text-sm font-bold text-zinc-400 dark:text-zinc-600 hover:text-zinc-600 dark:hover:text-zinc-400 transition-colors"
             >
               {isLogin ? "Don't have an account? Sign up" : "Already have an account? Sign in"}
             </button>
