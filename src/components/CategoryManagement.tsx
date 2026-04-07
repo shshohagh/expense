@@ -8,7 +8,6 @@ import {
   addCategory, 
   updateCategory, 
   deleteCategory, 
-  seedDefaultCategories,
   logActivity
 } from '../services/firestoreService';
 import { Category } from '../types';
@@ -40,7 +39,7 @@ export default function CategoryManagement() {
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
   const [formData, setFormData] = useState({
     name: '',
-    type: 'EXPENSE' as 'INCOME' | 'EXPENSE' | 'BUDGET'
+    type: 'EXPENSE' as 'INCOME' | 'EXPENSE'
   });
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -83,24 +82,6 @@ export default function CategoryManagement() {
     } catch (err) {
       setError('Failed to save category');
       console.error(err);
-    }
-  };
-
-  const handleSeed = async () => {
-    if (!user?.id) return;
-    if (!window.confirm('Are you sure you want to seed default global categories? This will add them to the system.')) return;
-    
-    setLoading(true);
-    try {
-      await seedDefaultCategories(DEFAULT_CATEGORIES);
-      await logActivity(user.id.toString(), user.name, user.email, 'SEED_CATEGORIES', 'Seeded default global categories');
-      setSuccess('Default categories seeded successfully');
-      setTimeout(() => setSuccess(''), 3000);
-    } catch (err) {
-      setError('Failed to seed categories');
-      console.error(err);
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -190,15 +171,6 @@ export default function CategoryManagement() {
             <Download size={18} />
             Excel
           </button>
-          {isAdmin && categories.filter(c => c.userId === null).length === 0 && (
-            <button
-              onClick={handleSeed}
-              className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl font-medium hover:bg-emerald-700 transition-colors"
-            >
-              <Database size={18} />
-              Seed
-            </button>
-          )}
           <button
             onClick={() => {
               setEditingCategory(null);
@@ -257,16 +229,6 @@ export default function CategoryManagement() {
           onEdit={openEditModal}
           onDelete={handleDelete}
           type="EXPENSE"
-          currentUserId={user?.id?.toString()}
-          isAdmin={isAdmin}
-        />
-        {/* Budget Categories */}
-        <CategorySection 
-          title="Budget Categories" 
-          categories={categories.filter(c => c.type === 'BUDGET')} 
-          onEdit={openEditModal}
-          onDelete={handleDelete}
-          type="BUDGET"
           currentUserId={user?.id?.toString()}
           isAdmin={isAdmin}
         />
@@ -336,12 +298,11 @@ export default function CategoryManagement() {
                   <label className="text-sm font-medium">Type</label>
                   <select
                     value={formData.type}
-                    onChange={(e) => setFormData({ ...formData, type: e.target.value as 'INCOME' | 'EXPENSE' | 'BUDGET' })}
+                    onChange={(e) => setFormData({ ...formData, type: e.target.value as 'INCOME' | 'EXPENSE' })}
                     className="w-full px-4 py-2 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100"
                   >
                     <option value="INCOME">INCOME</option>
                     <option value="EXPENSE">EXPENSE</option>
-                    <option value="BUDGET">BUDGET</option>
                   </select>
                 </div>
                 <div className="pt-4">
@@ -366,7 +327,7 @@ function CategorySection({ title, categories, onEdit, onDelete, type, currentUse
   categories: Category[], 
   onEdit: (c: Category) => void, 
   onDelete: (id: string) => void,
-  type: 'INCOME' | 'EXPENSE' | 'BUDGET',
+  type: 'INCOME' | 'EXPENSE',
   currentUserId?: string,
   isAdmin?: boolean
 }) {
