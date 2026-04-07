@@ -10,6 +10,7 @@ import Profile from './components/Profile';
 import UserActivity from './components/UserActivity';
 import Reports from './components/Reports';
 import BudgetManagement from './components/BudgetManagement';
+import Settings from './components/Settings';
 import { subscribeToTransactions, getTransactions } from './services/firestoreService';
 import { t, formatCurrency } from './utils/i18n';
 import { 
@@ -29,11 +30,12 @@ import {
   ChevronLeft,
   ChevronRight,
   Sun,
-  Moon
+  Moon,
+  Settings as SettingsIcon
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
-type View = 'dashboard' | 'transactions' | 'admin' | 'profile' | 'categories' | 'recurring' | 'activity' | 'reports' | 'budgets';
+type View = 'dashboard' | 'transactions' | 'admin' | 'profile' | 'categories' | 'recurring' | 'activity' | 'reports' | 'budgets' | 'settings';
 
 export default function App() {
   const { isAuthenticated, isLoading, user, logout } = useAuth();
@@ -101,7 +103,7 @@ export default function App() {
   }
 
   if (!isAuthenticated) {
-    return <Auth />;
+    return <Auth theme={theme} toggleTheme={toggleTheme} />;
   }
 
   const navItems = [
@@ -118,6 +120,7 @@ export default function App() {
       { id: 'admin', label: t('admin', lang), icon: Users }
     ] : []),
     { id: 'profile', label: t('profile', lang), icon: UserCircle },
+    { id: 'settings', label: 'Settings', icon: SettingsIcon },
   ];
 
   return (
@@ -316,6 +319,7 @@ export default function App() {
               {currentView === 'activity' && <UserActivity />}
               {currentView === 'reports' && <Reports />}
               {currentView === 'budgets' && <BudgetManagement />}
+              {currentView === 'settings' && <Settings />}
             </motion.div>
           </AnimatePresence>
         </div>

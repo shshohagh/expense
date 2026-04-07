@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { motion } from 'motion/react';
-import { LogIn, UserPlus, AlertCircle, Eye, EyeOff, CheckCircle2 } from 'lucide-react';
+import { LogIn, UserPlus, AlertCircle, Eye, EyeOff, CheckCircle2, Moon, Sun } from 'lucide-react';
 import { auth } from '../firebase';
 import { 
   signInWithEmailAndPassword, 
@@ -11,7 +11,7 @@ import {
   sendPasswordResetEmail
 } from 'firebase/auth';
 
-export default function Auth() {
+export default function Auth({ theme, toggleTheme }: { theme?: 'light' | 'dark', toggleTheme?: () => void }) {
   const { login } = useAuth();
   const [isLogin, setIsLogin] = useState(true);
   const [loading, setLoading] = useState(false);
@@ -106,7 +106,15 @@ export default function Auth() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 bg-zinc-50 dark:bg-black transition-colors duration-300">
+    <div className="min-h-screen flex items-center justify-center p-4 bg-zinc-50 dark:bg-black transition-colors duration-300 relative">
+      <div className="absolute top-8 right-8">
+        <button
+          onClick={toggleTheme}
+          className="p-3 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-2xl transition-colors bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-sm"
+        >
+          {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
+        </button>
+      </div>
       <motion.div 
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}

@@ -1,1 +1,19 @@
 @import "tailwindcss";
+
+@variant dark (&:where(.dark, .dark *));
+
+:root {
+  color-scheme: light;
+}
+
+.dark {
+  color-scheme: dark;
+}
+
+body {
+  @apply bg-zinc-50 text-zinc-900 transition-colors duration-300;
+}
+
+.dark body {
+  @apply bg-black text-zinc-100;
+}

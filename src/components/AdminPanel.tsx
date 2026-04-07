@@ -34,6 +34,8 @@ export default function AdminPanel() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [isAddingRole, setIsAddingRole] = useState(false);
+  const [newRoleName, setNewRoleName] = useState('');
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -66,15 +68,33 @@ export default function AdminPanel() {
   }, [currentUser?.role]);
 
   const handlePermissionToggle = async (role: string, permissionId: string) => {
-    const rolePerm = rolePermissions.find(rp => rp.role === role);
+    const rolePerm = rolePermissions.find(rp => (rp.role || (rp as any).id) === role);
     if (!rolePerm) return;
 
-    const newPermissions = rolePerm.permissions.includes(permissionId)
-      ? rolePerm.permissions.filter(p => p !== permissionId)
-      : [...rolePerm.permissions, permissionId];
+    const permissions = rolePerm.permissions || [];
+    const newPermissions = permissions.includes(permissionId)
+      ? permissions.filter(p => p !== permissionId)
+      : [...permissions, permissionId];
 
     try {
       await updateRolePermissions(role, newPermissions);
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  const handleAddRole = async () => {
+    if (!newRoleName.trim()) return;
+    const role = newRoleName.trim().toUpperCase();
+    if (rolePermissions.some(rp => (rp.role || (rp as any).id) === role)) {
+      alert('Role already exists');
+      return;
+    }
+
+    try {
+      await updateRolePermissions(role, []);
+      setNewRoleName('');
+      setIsAddingRole(false);
     } catch (error) {
       console.error(error);
     }
@@ -151,8 +171,8 @@ export default function AdminPanel() {
       <header>
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-3xl font-bold tracking-tight">Admin Dashboard</h1>
-            <p className="text-muted-foreground">Manage user accounts and system permissions.</p>
+            <h1 className="text-3xl font-bold tracking-tight">Admin</h1>
+            <p className="text-muted-foreground">Manage users and permissions.</p>
           </div>
           <div className="flex items-center gap-2">
             {activeTab === 'users' && (
@@ -181,8 +201,7 @@ export default function AdminPanel() {
                   }}
                   className="flex items-center gap-2 px-4 py-2 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-xl font-medium hover:opacity-90 transition-opacity"
                 >
-                  <Plus size={18} />
-                  Add User
+                  <Plus size={18} /> Add
                 </button>
               </>
             )}
@@ -221,6 +240,60 @@ export default function AdminPanel() {
             System Activity
           </button>
         </div>
+
+        {activeTab === 'permissions' && (
+          <div className="flex items-center gap-2 mb-6">
+            {isAddingRole ? (
+              <div className="flex items-center gap-2 bg-white dark:bg-zinc-900 p-1 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
+                <input
+                  type="text"
+                  placeholder="Role Name (e.g. MANAGER)"
+                  value={newRoleName}
+                  onChange={(e) => setNewRoleName(e.target.value)}
+                  className="px-3 py-1.5 text-sm bg-transparent focus:outline-none w-48"
+                  autoFocus
+                />
+                <button
+                  onClick={handleAddRole}
+                  className="p-1.5 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-colors"
+                >
+                  <Check size={16} />
+                </button>
+                <button
+                  onClick={() => setIsAddingRole(false)}
+                  className="p-1.5 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setIsAddingRole(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-xl font-medium hover:opacity-90 transition-opacity"
+              >
+                <Plus size={18} />
+                Add Role
+              </button>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'permissions' && (
+          <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 p-6 mb-6 shadow-sm">
+            <h3 className="text-sm font-bold uppercase tracking-wider text-muted-foreground mb-4">Existing Roles in System</h3>
+            <div className="flex flex-wrap gap-2">
+              {Array.from(new Set(users.map(u => u.role))).map(role => (
+                <div key={role} className="px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800 rounded-lg flex items-center gap-2 border border-zinc-200 dark:border-zinc-700">
+                  <Shield size={14} className="text-zinc-500" />
+                  <span className="text-sm font-semibold">{role}</span>
+                  <span className="text-[10px] bg-zinc-200 dark:bg-zinc-700 px-1.5 py-0.5 rounded text-zinc-500">
+                    {users.filter(u => u.role === role).length} users
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </header>
 
       {activeTab === 'users' ? (
@@ -305,44 +378,50 @@ export default function AdminPanel() {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {rolePermissions.map((rp) => (
-              <div key={rp.role} className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden shadow-sm">
-                <div className="p-6 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-800/50 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-lg">
-                      <Lock size={18} />
+            {Array.from(new Set([
+              ...users.map(u => u.role),
+              ...rolePermissions.map(rp => rp.role || (rp as any).id)
+            ])).filter(Boolean).map((roleName) => {
+              const rp = rolePermissions.find(p => (p.role || (p as any).id) === roleName);
+              return (
+                <div key={roleName} className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden shadow-sm">
+                  <div className="p-6 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-800/50 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-lg">
+                        <Lock size={18} />
+                      </div>
+                      <h3 className="font-bold text-lg">{roleName} Permissions</h3>
                     </div>
-                    <h3 className="font-bold text-lg">{rp.role} Permissions</h3>
+                  </div>
+                  <div className="p-6 space-y-4">
+                    {AVAILABLE_PERMISSIONS.map((perm) => (
+                      <div 
+                        key={perm.id}
+                        className="flex items-start justify-between gap-4 p-3 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors"
+                      >
+                        <div>
+                          <p className="font-semibold text-sm">{perm.label}</p>
+                          <p className="text-xs text-muted-foreground">{perm.description}</p>
+                        </div>
+                        <button
+                          disabled={roleName === 'SUPER_ADMIN'}
+                          onClick={() => handlePermissionToggle(roleName, perm.id)}
+                          className={`w-10 h-6 rounded-full transition-all relative ${
+                            (rp?.permissions || []).includes(perm.id) || roleName === 'SUPER_ADMIN'
+                              ? 'bg-emerald-500' 
+                              : 'bg-zinc-200 dark:bg-zinc-700'
+                          } ${roleName === 'SUPER_ADMIN' ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        >
+                          <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${
+                            (rp?.permissions || []).includes(perm.id) || roleName === 'SUPER_ADMIN' ? 'left-5' : 'left-1'
+                          }`} />
+                        </button>
+                      </div>
+                    ))}
                   </div>
                 </div>
-                <div className="p-6 space-y-4">
-                  {AVAILABLE_PERMISSIONS.map((perm) => (
-                    <div 
-                      key={perm.id}
-                      className="flex items-start justify-between gap-4 p-3 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors"
-                    >
-                      <div>
-                        <p className="font-semibold text-sm">{perm.label}</p>
-                        <p className="text-xs text-muted-foreground">{perm.description}</p>
-                      </div>
-                      <button
-                        disabled={rp.role === 'SUPER_ADMIN'}
-                        onClick={() => handlePermissionToggle(rp.role, perm.id)}
-                        className={`w-10 h-6 rounded-full transition-all relative ${
-                          rp.permissions.includes(perm.id) || rp.role === 'SUPER_ADMIN'
-                            ? 'bg-emerald-500' 
-                            : 'bg-zinc-200 dark:bg-zinc-700'
-                        } ${rp.role === 'SUPER_ADMIN' ? 'opacity-50 cursor-not-allowed' : ''}`}
-                      >
-                        <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${
-                          rp.permissions.includes(perm.id) || rp.role === 'SUPER_ADMIN' ? 'left-5' : 'left-1'
-                        }`} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       ) : (
