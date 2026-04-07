@@ -230,6 +230,19 @@ export const deleteRecurringTransaction = async (id: string) => {
   }
 };
 
+// Seed Default Categories
+export const seedDefaultCategories = async (categories: Omit<Category, 'id'>[]) => {
+  try {
+    const batch = categories.map(cat => addDoc(collection(db, 'categories'), {
+      ...cat,
+      deleted_at: null
+    }));
+    await Promise.all(batch);
+  } catch (error) {
+    handleFirestoreError(error, 'CREATE', 'categories/seed');
+  }
+};
+
 // Activity Logs
 export const subscribeToActivityLogs = (userId: string, callback: (data: any[]) => void) => {
   const q = query(

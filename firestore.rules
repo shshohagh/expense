@@ -118,7 +118,7 @@ service cloud.firestore {
 
     function isValidCategory(data) {
       return data.keys().hasOnly(['userId', 'name', 'type', 'deleted_at']) &&
-             (data.userId == null || data.userId == request.auth.uid) &&
+             ((data.userId == null && isAdmin()) || data.userId == request.auth.uid) &&
              data.name is string && data.name.size() > 0 && data.name.size() < 50 &&
              data.type in ['INCOME', 'EXPENSE'];
     }

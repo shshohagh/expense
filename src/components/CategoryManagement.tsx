@@ -1,9 +1,33 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { Plus, Edit2, Trash2, X, Tag } from 'lucide-react';
+import { Plus, Edit2, Trash2, X, Tag, Database, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { subscribeToCategories, addCategory, updateCategory, deleteCategory } from '../services/firestoreService';
+import { 
+  subscribeToCategories, 
+  addCategory, 
+  updateCategory, 
+  deleteCategory, 
+  seedDefaultCategories,
+  logActivity
+} from '../services/firestoreService';
 import { Category } from '../types';
+
+const DEFAULT_CATEGORIES: Omit<Category, 'id'>[] = [
+  { name: 'Salary', type: 'INCOME', userId: null },
+  { name: 'Freelance', type: 'INCOME', userId: null },
+  { name: 'Investments', type: 'INCOME', userId: null },
+  { name: 'Gifts', type: 'INCOME', userId: null },
+  { name: 'Food & Dining', type: 'EXPENSE', userId: null },
+  { name: 'Transportation', type: 'EXPENSE', userId: null },
+  { name: 'Housing', type: 'EXPENSE', userId: null },
+  { name: 'Utilities', type: 'EXPENSE', userId: null },
+  { name: 'Entertainment', type: 'EXPENSE', userId: null },
+  { name: 'Shopping', type: 'EXPENSE', userId: null },
+  { name: 'Healthcare', type: 'EXPENSE', userId: null },
+  { name: 'Education', type: 'EXPENSE', userId: null },
+  { name: 'Travel', type: 'EXPENSE', userId: null },
+  { name: 'Personal Care', type: 'EXPENSE', userId: null },
+];
 
 export default function CategoryManagement() {
   const { user } = useAuth();
@@ -17,6 +41,8 @@ export default function CategoryManagement() {
     name: '',
     type: 'EXPENSE' as 'INCOME' | 'EXPENSE'
   });
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
 
   useEffect(() => {
     if (!user?.id) return;
@@ -32,22 +58,48 @@ export default function CategoryManagement() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user?.id) return;
+    setError('');
+    setSuccess('');
 
     try {
       if (editingCategory) {
-        await updateCategory(editingCategory.id, formData);
+        await updateCategory(editingCategory.id.toString(), formData);
+        await logActivity(user.id.toString(), user.name, user.email, 'UPDATE_CATEGORY', `Updated category: ${formData.name}`);
+        setSuccess('Category updated successfully');
       } else {
         await addCategory({
           ...formData,
           userId: user.id.toString()
         });
+        await logActivity(user.id.toString(), user.name, user.email, 'ADD_CATEGORY', `Added category: ${formData.name}`);
+        setSuccess('Category added successfully');
       }
 
       setIsModalOpen(false);
       setEditingCategory(null);
       setFormData({ name: '', type: 'EXPENSE' });
-    } catch (error) {
-      console.error(error);
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err) {
+      setError('Failed to save category');
+      console.error(err);
+    }
+  };
+
+  const handleSeed = async () => {
+    if (!user?.id) return;
+    if (!window.confirm('Are you sure you want to seed default global categories? This will add them to the system.')) return;
+    
+    setLoading(true);
+    try {
+      await seedDefaultCategories(DEFAULT_CATEGORIES);
+      await logActivity(user.id.toString(), user.name, user.email, 'SEED_CATEGORIES', 'Seeded default global categories');
+      setSuccess('Default categories seeded successfully');
+      setTimeout(() => setSuccess(''), 3000);
+    } catch (err) {
+      setError('Failed to seed categories');
+      console.error(err);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -57,19 +109,24 @@ export default function CategoryManagement() {
   };
 
   const confirmDelete = async () => {
-    if (!itemToDelete) return;
+    if (!itemToDelete || !user?.id) return;
     try {
       await deleteCategory(itemToDelete);
+      await logActivity(user.id.toString(), user.name, user.email, 'DELETE_CATEGORY', `Deleted category ID: ${itemToDelete}`);
       setShowDeleteConfirm(false);
       setItemToDelete(null);
+      setSuccess('Category deleted successfully');
+      setTimeout(() => setSuccess(''), 3000);
     } catch (error) {
+      setError('Failed to delete category');
       console.error(error);
     }
   };
 
   const openEditModal = (cat: Category) => {
     if (cat.userId === null && user?.role !== 'SUPER_ADMIN') {
-      alert('You cannot edit global categories.');
+      setError('You cannot edit global categories.');
+      setTimeout(() => setError(''), 3000);
       return;
     }
     setEditingCategory(cat);
@@ -80,31 +137,63 @@ export default function CategoryManagement() {
     setIsModalOpen(true);
   };
 
-  const canManage = (cat: Category) => {
-    return cat.userId !== null || user?.role === 'SUPER_ADMIN';
-  };
-
-  // Everyone can now manage their own categories
+  const isAdmin = user?.role === 'SUPER_ADMIN' || user?.role === 'ADMIN';
 
   return (
     <div className="space-y-6">
-      <header className="flex items-center justify-between">
+      <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Category Management</h1>
           <p className="text-muted-foreground">Manage income and expense categories.</p>
         </div>
-        <button
-          onClick={() => {
-            setEditingCategory(null);
-            setFormData({ name: '', type: 'EXPENSE' });
-            setIsModalOpen(true);
-          }}
-          className="flex items-center gap-2 px-4 py-2 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-xl font-medium hover:opacity-90 transition-opacity"
-        >
-          <Plus size={18} />
-          Add Category
-        </button>
+        <div className="flex items-center gap-2">
+          {isAdmin && categories.filter(c => c.userId === null).length === 0 && (
+            <button
+              onClick={handleSeed}
+              className="flex items-center gap-2 px-4 py-2 bg-emerald-600 text-white rounded-xl font-medium hover:bg-emerald-700 transition-colors"
+            >
+              <Database size={18} />
+              Seed Defaults
+            </button>
+          )}
+          <button
+            onClick={() => {
+              setEditingCategory(null);
+              setFormData({ name: '', type: 'EXPENSE' });
+              setIsModalOpen(true);
+            }}
+            className="flex items-center gap-2 px-4 py-2 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-xl font-medium hover:opacity-90 transition-opacity"
+          >
+            <Plus size={18} />
+            Add Category
+          </button>
+        </div>
       </header>
+
+      <AnimatePresence>
+        {error && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="p-4 bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 rounded-2xl flex items-center gap-3 text-rose-600"
+          >
+            <AlertCircle size={20} />
+            <p className="text-sm font-medium">{error}</p>
+          </motion.div>
+        )}
+        {success && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="p-4 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-2xl flex items-center gap-3 text-emerald-600"
+          >
+            <CheckCircle2 size={20} />
+            <p className="text-sm font-medium">{success}</p>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Income Categories */}
@@ -114,8 +203,8 @@ export default function CategoryManagement() {
           onEdit={openEditModal}
           onDelete={handleDelete}
           type="INCOME"
-          currentUserId={user?.id}
-          userRole={user?.role}
+          currentUserId={user?.id?.toString()}
+          isAdmin={isAdmin}
         />
         
         {/* Expense Categories */}
@@ -125,8 +214,8 @@ export default function CategoryManagement() {
           onEdit={openEditModal}
           onDelete={handleDelete}
           type="EXPENSE"
-          currentUserId={user?.id}
-          userRole={user?.role}
+          currentUserId={user?.id?.toString()}
+          isAdmin={isAdmin}
         />
       </div>
 
@@ -218,14 +307,14 @@ export default function CategoryManagement() {
   );
 }
 
-function CategorySection({ title, categories, onEdit, onDelete, type, currentUserId, userRole }: { 
+function CategorySection({ title, categories, onEdit, onDelete, type, currentUserId, isAdmin }: { 
   title: string, 
   categories: Category[], 
   onEdit: (c: Category) => void, 
   onDelete: (id: string) => void,
   type: 'INCOME' | 'EXPENSE',
   currentUserId?: string,
-  userRole?: string
+  isAdmin?: boolean
 }) {
   return (
     <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden shadow-sm">
@@ -242,7 +331,7 @@ function CategorySection({ title, categories, onEdit, onDelete, type, currentUse
         ) : (
           categories.map((cat) => {
             const isGlobal = cat.userId === null;
-            const canManage = !isGlobal || userRole === 'SUPER_ADMIN';
+            const canManage = !isGlobal || isAdmin;
             
             return (
               <div key={cat.id} className="p-4 flex items-center justify-between hover:bg-zinc-50/50 dark:hover:bg-zinc-800/50 transition-colors">
