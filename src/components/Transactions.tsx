@@ -220,7 +220,7 @@ export default function Transactions() {
             }}
             className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-xl hover:opacity-90 transition-opacity"
           >
-            <Plus size={16} /> Add Transaction
+            <Plus size={16} /> Add
           </button>
         </div>
       </div>

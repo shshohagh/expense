@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { Budget, Category, Transaction } from '../types';
+import * as XLSX from 'xlsx';
 import { formatCurrency, t } from '../utils/i18n';
 import { Plus, Pencil, Trash2, AlertCircle, CheckCircle2, TrendingUp, Download, Filter } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -105,7 +106,7 @@ export default function BudgetManagement() {
     }
   };
 
-  const handleExport = (format: 'csv' | 'xlsx' | 'json') => {
+  const handleExport = (format: 'csv' | 'xlsx') => {
     const dataToExport = budgets.map(b => ({
       Category: b.categoryName,
       Amount: b.amount,
@@ -113,14 +114,7 @@ export default function BudgetManagement() {
       Type: b.categoryType
     }));
 
-    if (format === 'json') {
-      const blob = new Blob([JSON.stringify(dataToExport, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = 'budgets.json';
-      link.click();
-    } else if (format === 'csv') {
+    if (format === 'csv') {
       const headers = Object.keys(dataToExport[0]).join(',');
       const rows = dataToExport.map(row => Object.values(row).join(','));
       const csvContent = [headers, ...rows].join('\n');
@@ -131,7 +125,10 @@ export default function BudgetManagement() {
       link.download = 'budgets.csv';
       link.click();
     } else {
-      alert('Excel export requires additional libraries. Please use CSV or JSON.');
+      const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Budgets");
+      XLSX.writeFile(workbook, 'budgets.xlsx');
     }
   };
 
@@ -167,8 +164,8 @@ export default function BudgetManagement() {
   if (loading) return <div className="p-8 text-center">Loading budgets...</div>;
 
   return (
-    <div className="space-y-8">
-      <header className="flex items-center justify-between">
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">{t('budgets', lang)}</h1>
           <p className="text-muted-foreground">Manage your spending limits by category.</p>
@@ -189,13 +186,6 @@ export default function BudgetManagement() {
             Excel
           </button>
           <button
-            onClick={() => handleExport('json')}
-            className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-sm font-medium hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors shadow-sm"
-          >
-            <Download size={18} />
-            JSON
-          </button>
-          <button
             onClick={() => {
               setEditingBudget(null);
               setFormData({ categoryId: '', amount: '', period: 'MONTHLY' });
@@ -203,11 +193,10 @@ export default function BudgetManagement() {
             }}
             className="flex items-center gap-2 px-4 py-2 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-xl text-sm font-medium hover:opacity-90 transition-opacity shadow-sm"
           >
-            <Plus size={18} />
-            Add Budget
+            <Plus size={18} /> Add
           </button>
         </div>
-      </header>
+      </div>
 
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div className="flex p-1 bg-zinc-100 dark:bg-zinc-800 rounded-xl w-full sm:w-auto">

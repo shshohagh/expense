@@ -146,7 +146,7 @@ export default function RecurringTransactions() {
 
   return (
     <div className="space-y-6">
-      <header className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Recurring Transactions</h1>
           <p className="text-muted-foreground">Automate your regular income and expenses.</p>
@@ -159,10 +159,9 @@ export default function RecurringTransactions() {
           }}
           className="flex items-center gap-2 px-4 py-2 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-xl font-medium hover:opacity-90 transition-opacity"
         >
-          <Plus size={18} />
-          Add Recurring
+          <Plus size={18} /> Add 
         </button>
-      </header>
+      </div>
 
       <div className="grid grid-cols-1 gap-4">
         {loading ? (

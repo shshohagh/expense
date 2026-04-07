@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { Transaction } from '../types';
+import * as XLSX from 'xlsx';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
   LineChart, Line, Cell, PieChart, Pie, Legend, AreaChart, Area
@@ -142,28 +143,43 @@ export default function Reports() {
 
   const topExpenses = getTopExpenses();
 
-  const handleExport = () => {
+  const handleExport = (format: 'csv' | 'xlsx') => {
     const headers = ['Date', 'Type', 'Amount', 'Category', 'Description'];
-    const csvContent = [
-      headers.join(','),
-      ...activeTransactions.map(t => [
-        t.date,
-        t.type,
-        t.amount,
-        t.categoryName || '',
-        `"${t.description || ''}"`
-      ].join(','))
-    ].join('\n');
+    const data = activeTransactions.map(t => ({
+      Date: t.date,
+      Type: t.type,
+      Amount: t.amount,
+      Category: t.categoryName || '',
+      Description: t.description || ''
+    }));
 
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    link.setAttribute('download', `financial_report_${reportType}_${selectedYear}.csv`);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    if (format === 'csv') {
+      const csvContent = [
+        headers.join(','),
+        ...data.map(row => [
+          row.Date,
+          row.Type,
+          row.Amount,
+          row.Category,
+          `"${row.Description}"`
+        ].join(','))
+      ].join('\n');
+
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const link = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', `financial_report_${reportType}_${selectedYear}.csv`);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } else {
+      const worksheet = XLSX.utils.json_to_sheet(data);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Financial Report");
+      XLSX.writeFile(workbook, `financial_report_${reportType}_${selectedYear}.xlsx`);
+    }
   };
 
   if (loading) return <div className="p-8 text-center">Loading reports...</div>;
@@ -175,13 +191,20 @@ export default function Reports() {
           <h1 className="text-3xl font-bold tracking-tight">{t('reports', lang)}</h1>
           <p className="text-muted-foreground">Comprehensive financial analysis and visualizations.</p>
         </div>
-        <button 
-          onClick={handleExport}
-          className="flex items-center gap-2 px-4 py-2 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-xl text-sm font-medium hover:opacity-90 transition-opacity shadow-sm self-start md:self-auto"
-        >
-          <Download size={16} />
-          Export Data
-        </button>
+        <div className="flex items-center gap-2">
+          <button 
+            onClick={() => handleExport('csv')}
+            className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl text-sm font-medium hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors shadow-sm self-start md:self-auto"
+          >
+            <Download size={16} /> CSV
+          </button>
+          <button 
+            onClick={() => handleExport('xlsx')}
+            className="flex items-center gap-2 px-4 py-2 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-xl text-sm font-medium hover:opacity-90 transition-opacity shadow-sm self-start md:self-auto"
+          >
+            <Download size={16} /> Excel
+          </button>
+        </div>
       </header>
 
       {/* Report Type Selector */}
