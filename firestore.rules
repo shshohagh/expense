@@ -108,7 +108,7 @@ service cloud.firestore {
     }
 
     function isValidTransaction(data) {
-      return data.keys().hasOnly(['userId', 'type', 'amount', 'categoryId', 'categoryName', 'date', 'description', 'status', 'created_at', 'deleted_at']) &&
+      return data.keys().hasOnly(['userId', 'type', 'amount', 'categoryId', 'categoryName', 'date', 'description', 'status', 'created_at', 'deleted_at', 'isDemo']) &&
              data.userId == request.auth.uid &&
              data.type in ['INCOME', 'EXPENSE', 'BUDGET'] &&
              data.amount is number &&
@@ -117,21 +117,21 @@ service cloud.firestore {
     }
 
     function isValidCategory(data) {
-      return data.keys().hasOnly(['userId', 'name', 'type', 'deleted_at']) &&
+      return data.keys().hasOnly(['userId', 'name', 'type', 'deleted_at', 'isDemo']) &&
              ((data.userId == null && isAdmin()) || data.userId == request.auth.uid) &&
              data.name is string && data.name.size() > 0 && data.name.size() < 50 &&
              data.type in ['INCOME', 'EXPENSE', 'BUDGET'];
     }
 
     function isValidBudget(data) {
-      return data.keys().hasOnly(['userId', 'categoryId', 'categoryName', 'categoryType', 'amount', 'period', 'created_at', 'deleted_at']) &&
+      return data.keys().hasOnly(['userId', 'categoryId', 'categoryName', 'categoryType', 'amount', 'period', 'created_at', 'deleted_at', 'isDemo']) &&
              data.userId == request.auth.uid &&
              data.amount is number &&
              data.period in ['MONTHLY', 'YEARLY'];
     }
 
     function isValidRecurring(data) {
-      return data.keys().hasOnly(['userId', 'type', 'amount', 'categoryId', 'categoryName', 'frequency', 'startDate', 'description', 'active', 'created_at', 'deleted_at', 'updated_at']) &&
+      return data.keys().hasOnly(['userId', 'type', 'amount', 'categoryId', 'categoryName', 'frequency', 'startDate', 'description', 'active', 'created_at', 'deleted_at', 'updated_at', 'isDemo']) &&
              data.userId == request.auth.uid &&
              data.type in ['INCOME', 'EXPENSE', 'BUDGET'] &&
              data.amount is number &&

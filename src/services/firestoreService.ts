@@ -12,7 +12,8 @@ import {
   orderBy,
   limit,
   getDoc,
-  setDoc
+  setDoc,
+  writeBatch
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
 import { Transaction, Category, Budget } from '../types';
@@ -270,6 +271,126 @@ export const logActivity = async (userId: string, userName: string, userEmail: s
     });
   } catch (error) {
     console.error('Failed to log activity:', error);
+  }
+};
+
+// Demo Data Management
+export const loadDemoData = async (userId: string) => {
+  try {
+    const batch = writeBatch(db);
+    
+    // Demo Categories
+    const demoCategories = [
+      { name: 'Demo: Salary', type: 'INCOME' as const },
+      { name: 'Demo: Freelance', type: 'INCOME' as const },
+      { name: 'Demo: Groceries', type: 'EXPENSE' as const },
+      { name: 'Demo: Rent', type: 'EXPENSE' as const },
+      { name: 'Demo: Entertainment', type: 'EXPENSE' as const },
+      { name: 'Demo: Transport', type: 'EXPENSE' as const },
+    ];
+
+    const categoryRefs: { [key: string]: any } = {};
+
+    for (const cat of demoCategories) {
+      const catRef = doc(collection(db, 'categories'));
+      batch.set(catRef, {
+        ...cat,
+        userId,
+        isDemo: true,
+        deleted_at: null
+      });
+      categoryRefs[cat.name] = catRef;
+    }
+
+    // Demo Transactions
+    const demoTransactions = [
+      { amount: 5000, type: 'INCOME' as const, categoryName: 'Demo: Salary', description: 'Monthly Salary', date: new Date().toISOString().split('T')[0] },
+      { amount: 1200, type: 'INCOME' as const, categoryName: 'Demo: Freelance', description: 'Project Payment', date: new Date().toISOString().split('T')[0] },
+      { amount: 150, type: 'EXPENSE' as const, categoryName: 'Demo: Groceries', description: 'Weekly Groceries', date: new Date().toISOString().split('T')[0] },
+      { amount: 2000, type: 'EXPENSE' as const, categoryName: 'Demo: Rent', description: 'Apartment Rent', date: new Date().toISOString().split('T')[0] },
+      { amount: 80, type: 'EXPENSE' as const, categoryName: 'Demo: Entertainment', description: 'Movie Night', date: new Date().toISOString().split('T')[0] },
+      { amount: 45, type: 'EXPENSE' as const, categoryName: 'Demo: Transport', description: 'Fuel', date: new Date().toISOString().split('T')[0] },
+    ];
+
+    for (const trans of demoTransactions) {
+      const transRef = doc(collection(db, 'transactions'));
+      batch.set(transRef, {
+        amount: trans.amount,
+        type: trans.type,
+        categoryId: categoryRefs[trans.categoryName].id,
+        categoryName: trans.categoryName,
+        description: trans.description,
+        date: trans.date,
+        userId,
+        status: 'ACTIVE',
+        isDemo: true,
+        created_at: serverTimestamp(),
+        deleted_at: null
+      });
+    }
+
+    // Demo Budgets
+    const demoBudgets = [
+      { amount: 500, categoryName: 'Demo: Groceries', period: 'MONTHLY' as const },
+      { amount: 200, categoryName: 'Demo: Entertainment', period: 'MONTHLY' as const },
+    ];
+
+    for (const budget of demoBudgets) {
+      const budgetRef = doc(collection(db, 'budgets'));
+      batch.set(budgetRef, {
+        amount: budget.amount,
+        categoryId: categoryRefs[budget.categoryName].id,
+        categoryName: budget.categoryName,
+        period: budget.period,
+        userId,
+        isDemo: true,
+        created_at: serverTimestamp(),
+        deleted_at: null
+      });
+    }
+
+    // Demo Recurring Transaction
+    const recurringRef = doc(collection(db, 'recurring_transactions'));
+    batch.set(recurringRef, {
+      amount: 2000,
+      type: 'EXPENSE',
+      categoryId: categoryRefs['Demo: Rent'].id,
+      categoryName: 'Demo: Rent',
+      description: 'Monthly Rent (Recurring)',
+      frequency: 'MONTHLY',
+      startDate: new Date().toISOString().split('T')[0],
+      active: true,
+      userId,
+      isDemo: true,
+      created_at: serverTimestamp(),
+      deleted_at: null
+    });
+
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, 'CREATE', 'demo_data/load');
+  }
+};
+
+export const deleteDemoData = async (userId: string) => {
+  try {
+    const collections = ['transactions', 'categories', 'budgets', 'recurring_transactions'];
+    
+    for (const colName of collections) {
+      const q = query(
+        collection(db, colName),
+        where('userId', '==', userId),
+        where('isDemo', '==', true)
+      );
+      const snapshot = await getDocs(q);
+      const batch = writeBatch(db);
+      snapshot.docs.forEach((doc) => {
+        batch.delete(doc.ref);
+      });
+      await batch.commit();
+    }
+  } catch (error) {
+    handleFirestoreError(error, 'DELETE', 'demo_data/delete');
   }
 };
 

@@ -21,6 +21,7 @@ export interface Transaction {
   description: string;
   status: 'ACTIVE' | 'INACTIVE';
   created_at: string;
+  isDemo?: boolean;
 }
 
 export interface Category {
@@ -28,6 +29,7 @@ export interface Category {
   userId: string | number | null;
   name: string;
   type: 'INCOME' | 'EXPENSE';
+  isDemo?: boolean;
 }
 
 export interface AuthState {
@@ -46,4 +48,5 @@ export interface Budget {
   amount: number;
   period: 'MONTHLY' | 'YEARLY';
   created_at: string;
+  isDemo?: boolean;
 }
