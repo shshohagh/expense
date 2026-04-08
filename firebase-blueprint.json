@@ -11,6 +11,8 @@
         "status": { "type": "string", "enum": ["PENDING", "APPROVED", "REJECTED", "CANCEL"] },
         "currency": { "type": "string" },
         "language": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "phoneNumber": { "type": "string" },
         "created_at": { "type": "string", "format": "date-time" },
         "deleted_at": { "type": "string", "format": "date-time" }
       },

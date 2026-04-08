@@ -173,8 +173,17 @@ export default function App() {
               <p className="text-sm font-bold leading-none">{user?.name}</p>
               <p className="text-[10px] text-muted-foreground uppercase tracking-wider mt-0.5">{user?.role}</p>
             </div>
-            <div className="w-8 h-8 rounded-full bg-zinc-900 dark:bg-zinc-100 flex items-center justify-center text-white dark:text-zinc-900 font-bold text-xs">
-              {user?.name?.charAt(0).toUpperCase()}
+            <div className="w-8 h-8 rounded-full bg-zinc-900 dark:bg-zinc-100 flex items-center justify-center text-white dark:text-zinc-900 font-bold text-xs overflow-hidden">
+              {user?.photoURL ? (
+                <img 
+                  src={user.photoURL} 
+                  alt={user.name} 
+                  className="w-full h-full object-cover"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                user?.name?.charAt(0).toUpperCase()
+              )}
             </div>
           </div>
         </div>

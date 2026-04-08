@@ -1,15 +1,22 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { User } from '../types';
-import { Shield, User as UserIcon, Plus, Edit2, X, Eye, EyeOff, Lock, Check, AlertCircle, FileText, FileSpreadsheet } from 'lucide-react';
+import { Shield, User as UserIcon, Plus, Edit2, X, Eye, EyeOff, Lock, Check, AlertCircle, FileText, FileSpreadsheet, Trash2, Camera, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
+import { storage } from '../firebase';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { 
   subscribeToUsers, 
   updateUserStatus, 
   subscribeToRolePermissions, 
   updateRolePermissions, 
-  subscribeToAllActivityLogs 
+  subscribeToAllActivityLogs,
+  adminCreateUser,
+  adminUpdateUser,
+  adminDeleteUser,
+  deleteRole,
+  renameRole
 } from '../services/firestoreService';
 
 interface RolePermission {
@@ -36,12 +43,33 @@ export default function AdminPanel() {
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [isAddingRole, setIsAddingRole] = useState(false);
   const [newRoleName, setNewRoleName] = useState('');
+  const [renamingRole, setRenamingRole] = useState<{ oldName: string, newName: string } | null>(null);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+    type: 'danger' | 'info';
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    onConfirm: () => {},
+    type: 'info'
+  });
+  const [notification, setNotification] = useState<{
+    message: string;
+    type: 'success' | 'error' | 'info';
+  } | null>(null);
   const [formData, setFormData] = useState({
     name: '',
     email: '',
     password: '',
     role: 'USER',
-    status: 'PENDING'
+    status: 'PENDING',
+    photoURL: '',
+    phoneNumber: ''
   });
 
   useEffect(() => {
@@ -87,7 +115,7 @@ export default function AdminPanel() {
     if (!newRoleName.trim()) return;
     const role = newRoleName.trim().toUpperCase();
     if (rolePermissions.some(rp => (rp.role || (rp as any).id) === role)) {
-      alert('Role already exists');
+      setNotification({ message: 'Role already exists', type: 'error' });
       return;
     }
 
@@ -95,8 +123,61 @@ export default function AdminPanel() {
       await updateRolePermissions(role, []);
       setNewRoleName('');
       setIsAddingRole(false);
+      setNotification({ message: 'Role added successfully', type: 'success' });
     } catch (error) {
       console.error(error);
+      setNotification({ message: 'Failed to add role', type: 'error' });
+    }
+  };
+
+  const handleDeleteRole = async (role: string) => {
+    if (role === 'SUPER_ADMIN' || role === 'ADMIN' || role === 'USER') {
+      setNotification({ message: 'Cannot delete core system roles', type: 'error' });
+      return;
+    }
+
+    const userCount = users.filter(u => u.role === role).length;
+    const message = userCount > 0 
+      ? `There are ${userCount} users with this role. Deleting the role will not delete the users, but they will lose their permissions. Continue?`
+      : `Are you sure you want to delete the role "${role}"?`;
+
+    setConfirmModal({
+      isOpen: true,
+      title: 'Delete Role',
+      message,
+      type: 'danger',
+      onConfirm: async () => {
+        try {
+          await deleteRole(role);
+          setNotification({ message: 'Role deleted successfully', type: 'success' });
+        } catch (error) {
+          console.error(error);
+          setNotification({ message: 'Failed to delete role', type: 'error' });
+        }
+        setConfirmModal(prev => ({ ...prev, isOpen: false }));
+      }
+    });
+  };
+
+  const handleRenameRole = async () => {
+    if (!renamingRole || !renamingRole.newName.trim() || renamingRole.newName === renamingRole.oldName) {
+      setRenamingRole(null);
+      return;
+    }
+
+    const newRole = renamingRole.newName.trim().toUpperCase();
+    if (rolePermissions.some(rp => (rp.role || (rp as any).id) === newRole)) {
+      setNotification({ message: 'Role already exists', type: 'error' });
+      return;
+    }
+
+    try {
+      await renameRole(renamingRole.oldName, newRole);
+      setRenamingRole(null);
+      setNotification({ message: 'Role renamed successfully', type: 'success' });
+    } catch (error) {
+      console.error(error);
+      setNotification({ message: 'Failed to rename role', type: 'error' });
     }
   };
 
@@ -108,9 +189,69 @@ export default function AdminPanel() {
     }
   };
 
+  const handleDeleteUser = async (user: User) => {
+    if (user.role === 'SUPER_ADMIN') {
+      setNotification({ message: 'Cannot delete a Super Admin', type: 'error' });
+      return;
+    }
+
+    setConfirmModal({
+      isOpen: true,
+      title: 'Delete User',
+      message: `Are you sure you want to delete ${user.name}? This action cannot be undone.`,
+      type: 'danger',
+      onConfirm: async () => {
+        try {
+          await adminDeleteUser(user.id.toString());
+          setNotification({ message: 'User deleted successfully', type: 'success' });
+        } catch (error) {
+          console.error(error);
+          setNotification({ message: 'Failed to delete user', type: 'error' });
+        }
+        setConfirmModal(prev => ({ ...prev, isOpen: false }));
+      }
+    });
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    alert('User creation/editing from Admin Panel is currently being implemented for Firebase.');
+    setLoading(true);
+    try {
+      if (editingUser) {
+        await adminUpdateUser(editingUser.id.toString(), {
+          name: formData.name,
+          email: formData.email,
+          role: formData.role,
+          status: formData.status,
+          photoURL: formData.photoURL,
+          phoneNumber: formData.phoneNumber
+        });
+      } else {
+        // For new users, we generate a temporary ID
+        const tempId = `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        await adminCreateUser({
+          id: tempId,
+          name: formData.name,
+          email: formData.email,
+          role: formData.role,
+          status: formData.status,
+          currency: 'USD',
+          language: 'en',
+          permissions: [],
+          photoURL: formData.photoURL,
+          phoneNumber: formData.phoneNumber
+        });
+      }
+      setIsModalOpen(false);
+      setEditingUser(null);
+      setFormData({ name: '', email: '', password: '', role: 'USER', status: 'PENDING', photoURL: '', phoneNumber: '' });
+      setNotification({ message: editingUser ? 'User updated' : 'User created', type: 'success' });
+    } catch (error) {
+      console.error(error);
+      setNotification({ message: 'Failed to save user', type: 'error' });
+    } finally {
+      setLoading(false);
+    }
   };
 
   const openEditModal = (user: User) => {
@@ -120,9 +261,63 @@ export default function AdminPanel() {
       email: user.email,
       password: '',
       role: user.role,
-      status: user.status
+      status: user.status,
+      photoURL: user.photoURL || '',
+      phoneNumber: user.phoneNumber || ''
     });
     setIsModalOpen(true);
+  };
+
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setNotification({ message: 'Please upload an image file', type: 'error' });
+      return;
+    }
+    
+    // Limit size for Base64 (around 500KB to stay safe within Firestore 1MB limit)
+    if (file.size > 500 * 1024) {
+      setNotification({ message: 'File size should be less than 500KB', type: 'error' });
+      return;
+    }
+
+    setUploadingPhoto(true);
+    try {
+      // Try Storage first
+      try {
+        const storageRef = ref(storage, `users/admin_upload_${Date.now()}`);
+        await uploadBytes(storageRef, file);
+        const url = await getDownloadURL(storageRef);
+        setFormData(prev => ({ ...prev, photoURL: url }));
+        setNotification({ message: 'Photo uploaded to cloud successfully', type: 'success' });
+      } catch (storageError) {
+        console.warn('Storage upload failed, falling back to Base64:', storageError);
+        
+        // Fallback to Base64
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const base64String = reader.result as string;
+          setFormData(prev => ({ ...prev, photoURL: base64String }));
+          setNotification({ message: 'Photo processed locally (Storage unavailable)', type: 'info' });
+          setUploadingPhoto(false);
+        };
+        reader.onerror = () => {
+          setNotification({ message: 'Failed to read file locally', type: 'error' });
+          setUploadingPhoto(false);
+        };
+        reader.readAsDataURL(file);
+        return; // Exit early as reader is async
+      }
+    } catch (error: any) {
+      console.error(error);
+      setNotification({ message: 'Failed to process photo', type: 'error' });
+    } finally {
+      // If we didn't exit early via reader, stop loading
+      if (!file.type.startsWith('image/')) setUploadingPhoto(false);
+      else if (formData.photoURL.startsWith('http')) setUploadingPhoto(false);
+    }
   };
 
   const exportUsersCSV = () => {
@@ -282,7 +477,11 @@ export default function AdminPanel() {
           <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 p-6 mb-6 shadow-sm">
             <h3 className="text-sm font-bold uppercase tracking-wider text-muted-foreground mb-4">Existing Roles in System</h3>
             <div className="flex flex-wrap gap-2">
-              {Array.from(new Set(users.map(u => u.role))).map(role => (
+              {Array.from(new Set([
+                'USER', 'ADMIN', 'SUPER_ADMIN',
+                ...users.map(u => u.role),
+                ...rolePermissions.map(rp => rp.role || (rp as any).id)
+              ])).filter(Boolean).map(role => (
                 <div key={role} className="px-3 py-1.5 bg-zinc-100 dark:bg-zinc-800 rounded-lg flex items-center gap-2 border border-zinc-200 dark:border-zinc-700">
                   <Shield size={14} className="text-zinc-500" />
                   <span className="text-sm font-semibold">{role}</span>
@@ -313,12 +512,22 @@ export default function AdminPanel() {
                   <tr key={u.id} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-800/50 transition-colors">
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-zinc-500">
-                          <UserIcon size={16} />
+                        <div className="w-8 h-8 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-zinc-500 overflow-hidden">
+                          {u.photoURL ? (
+                            <img 
+                              src={u.photoURL} 
+                              alt={u.name} 
+                              className="w-full h-full object-cover"
+                              referrerPolicy="no-referrer"
+                            />
+                          ) : (
+                            <UserIcon size={16} />
+                          )}
                         </div>
                         <div>
                           <p className="text-sm font-medium">{u.name}</p>
                           <p className="text-xs text-muted-foreground">{u.email}</p>
+                          {u.phoneNumber && <p className="text-[10px] text-muted-foreground">{u.phoneNumber}</p>}
                         </div>
                       </div>
                     </td>
@@ -350,6 +559,18 @@ export default function AdminPanel() {
                         >
                           <Edit2 size={18} />
                         </button>
+                        <button
+                          onClick={() => handleDeleteUser(u)}
+                          disabled={u.role === 'SUPER_ADMIN'}
+                          className={`p-2 transition-colors ${
+                            u.role === 'SUPER_ADMIN' 
+                              ? 'text-zinc-300 dark:text-zinc-700 cursor-not-allowed' 
+                              : 'text-zinc-500 hover:text-rose-600 dark:hover:text-rose-400'
+                          }`}
+                          title={u.role === 'SUPER_ADMIN' ? 'Cannot delete Super Admin' : 'Delete User'}
+                        >
+                          <Trash2 size={18} />
+                        </button>
                         <select
                           value={u.status}
                           onChange={(e) => handleStatusUpdate(u.id.toString(), e.target.value)}
@@ -379,9 +600,10 @@ export default function AdminPanel() {
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {Array.from(new Set([
+              'USER', 'ADMIN',
               ...users.map(u => u.role),
               ...rolePermissions.map(rp => rp.role || (rp as any).id)
-            ])).filter(Boolean).map((roleName) => {
+            ])).filter(role => role && role !== 'SUPER_ADMIN').map((roleName) => {
               const rp = rolePermissions.find(p => (p.role || (p as any).id) === roleName);
               return (
                 <div key={roleName} className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden shadow-sm">
@@ -390,8 +612,44 @@ export default function AdminPanel() {
                       <div className="p-2 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-lg">
                         <Lock size={18} />
                       </div>
-                      <h3 className="font-bold text-lg">{roleName} Permissions</h3>
+                      {renamingRole?.oldName === roleName ? (
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            value={renamingRole.newName}
+                            onChange={(e) => setRenamingRole({ ...renamingRole, newName: e.target.value })}
+                            className="bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-lg px-2 py-1 text-sm focus:outline-none"
+                            autoFocus
+                          />
+                          <button onClick={handleRenameRole} className="p-1 text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded">
+                            <Check size={16} />
+                          </button>
+                          <button onClick={() => setRenamingRole(null)} className="p-1 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded">
+                            <X size={16} />
+                          </button>
+                        </div>
+                      ) : (
+                        <h3 className="font-bold text-lg">{roleName} Permissions</h3>
+                      )}
                     </div>
+                    {roleName !== 'SUPER_ADMIN' && roleName !== 'ADMIN' && roleName !== 'USER' && (
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => setRenamingRole({ oldName: roleName, newName: roleName })}
+                          className="p-2 text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors"
+                          title="Rename Role"
+                        >
+                          <Edit2 size={16} />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteRole(roleName)}
+                          className="p-2 text-zinc-500 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-lg transition-colors"
+                          title="Delete Role"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    )}
                   </div>
                   <div className="p-6 space-y-4">
                     {AVAILABLE_PERMISSIONS.map((perm) => (
@@ -463,6 +721,63 @@ export default function AdminPanel() {
       )}
 
       <AnimatePresence>
+        {notification && (
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 20 }}
+            className={`fixed bottom-8 right-8 z-[100] px-6 py-3 rounded-2xl shadow-xl flex items-center gap-3 border ${
+              notification.type === 'success' ? 'bg-emerald-500 border-emerald-400 text-white' :
+              notification.type === 'error' ? 'bg-rose-500 border-rose-400 text-white' :
+              'bg-zinc-900 border-zinc-800 text-white'
+            }`}
+          >
+            {notification.type === 'success' ? <Check size={18} /> : 
+             notification.type === 'error' ? <AlertCircle size={18} /> : <Shield size={18} />}
+            <span className="font-medium">{notification.message}</span>
+            <button onClick={() => setNotification(null)} className="ml-2 opacity-70 hover:opacity-100">
+              <X size={16} />
+            </button>
+          </motion.div>
+        )}
+
+        {confirmModal.isOpen && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="w-full max-w-sm bg-white dark:bg-zinc-900 rounded-3xl shadow-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden"
+            >
+              <div className="p-6 text-center">
+                <div className={`w-12 h-12 rounded-full mx-auto mb-4 flex items-center justify-center ${
+                  confirmModal.type === 'danger' ? 'bg-rose-100 text-rose-600' : 'bg-zinc-100 text-zinc-600'
+                }`}>
+                  <AlertCircle size={24} />
+                </div>
+                <h3 className="text-lg font-bold mb-2">{confirmModal.title}</h3>
+                <p className="text-sm text-muted-foreground mb-6">{confirmModal.message}</p>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+                    className="flex-1 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 rounded-xl font-medium hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={confirmModal.onConfirm}
+                    className={`flex-1 px-4 py-2 rounded-xl font-medium text-white transition-opacity hover:opacity-90 ${
+                      confirmModal.type === 'danger' ? 'bg-rose-600' : 'bg-zinc-900 dark:bg-zinc-100 dark:text-zinc-900'
+                    }`}
+                  >
+                    Confirm
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
         {isModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
             <motion.div
@@ -498,6 +813,68 @@ export default function AdminPanel() {
                     onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                     className="w-full px-4 py-2 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100"
                     placeholder="name@example.com"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Photo URL</label>
+                  <div className="flex gap-3">
+                    <div className="relative flex-1">
+                      <input
+                        type="url"
+                        value={formData.photoURL}
+                        onChange={(e) => setFormData({ ...formData, photoURL: e.target.value })}
+                        className="w-full px-4 py-2 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100"
+                        placeholder="https://example.com/photo.jpg"
+                      />
+                    </div>
+                    <div className="relative">
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handlePhotoUpload}
+                        disabled={uploadingPhoto}
+                        className="absolute inset-0 opacity-0 cursor-pointer disabled:cursor-not-allowed"
+                      />
+                      <button
+                        type="button"
+                        disabled={uploadingPhoto}
+                        className="flex items-center justify-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-800 rounded-xl text-sm font-medium hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all disabled:opacity-50"
+                      >
+                        {uploadingPhoto ? <Loader2 size={18} className="animate-spin" /> : <Camera size={18} />}
+                      </button>
+                    </div>
+                  </div>
+                  {formData.photoURL && (
+                    <div className="mt-2 flex items-center gap-4 p-2 bg-zinc-50 dark:bg-zinc-800/50 rounded-xl border border-zinc-200 dark:border-zinc-800">
+                      <div className="w-10 h-10 rounded-full overflow-hidden border border-zinc-200 dark:border-zinc-700 shadow-sm">
+                        <img 
+                          src={formData.photoURL} 
+                          alt="Preview" 
+                          className="w-full h-full object-cover"
+                          referrerPolicy="no-referrer"
+                        />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[10px] text-muted-foreground truncate">{formData.photoURL}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setFormData({ ...formData, photoURL: '' })}
+                        className="p-1 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-lg transition-colors"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Phone Number</label>
+                  <input
+                    type="tel"
+                    value={formData.phoneNumber}
+                    onChange={(e) => setFormData({ ...formData, phoneNumber: e.target.value })}
+                    className="w-full px-4 py-2 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100"
+                    placeholder="+1234567890"
                   />
                 </div>
                 <div className="space-y-2">

@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User, AuthState } from '../types';
 import { auth, db } from '../firebase';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, setDoc, serverTimestamp, query, collection, where, getDocs, deleteDoc } from 'firebase/firestore';
 
 interface AuthContextType extends AuthState {
   login: (token: string, user: User) => void;
@@ -30,23 +30,48 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           if (userDoc.exists()) {
             userData = userDoc.data() as User;
           } else {
-            // Create initial user profile if it doesn't exist
-            const isSuperAdmin = firebaseUser.email === 'shshohagh4@gmail.com';
-            userData = {
-              id: firebaseUser.uid as any,
-              email: firebaseUser.email || '',
-              name: firebaseUser.displayName || 'User',
-              role: isSuperAdmin ? 'SUPER_ADMIN' : 'USER',
-              status: isSuperAdmin ? 'APPROVED' : 'PENDING',
-              currency: 'USD',
-              language: 'en',
-              permissions: isSuperAdmin ? ['manage_users', 'manage_categories', 'export_data', 'view_admin_panel'] : [],
-              created_at: new Date().toISOString(),
-            };
-            await setDoc(doc(db, 'users', firebaseUser.uid), {
-              ...userData,
-              created_at: serverTimestamp(),
-            });
+            // Check if a user with this email was pre-created by an admin
+            const q = query(collection(db, 'users'), where('email', '==', firebaseUser.email));
+            const querySnapshot = await getDocs(q);
+            
+            if (!querySnapshot.empty) {
+              const existingDoc = querySnapshot.docs[0];
+              const existingData = existingDoc.data() as User;
+              
+              userData = {
+                ...existingData,
+                id: firebaseUser.uid as any,
+              };
+
+              // Create the new doc with UID as key
+              await setDoc(doc(db, 'users', firebaseUser.uid), {
+                ...userData,
+                updated_at: serverTimestamp(),
+              });
+
+              // Delete the temporary pre-created doc if its ID wasn't the UID
+              if (existingDoc.id !== firebaseUser.uid) {
+                await deleteDoc(doc(db, 'users', existingDoc.id));
+              }
+            } else {
+              // Create initial user profile if it doesn't exist
+              const isSuperAdmin = firebaseUser.email === 'shshohagh4@gmail.com';
+              userData = {
+                id: firebaseUser.uid as any,
+                email: firebaseUser.email || '',
+                name: firebaseUser.displayName || 'User',
+                role: isSuperAdmin ? 'SUPER_ADMIN' : 'USER',
+                status: isSuperAdmin ? 'APPROVED' : 'PENDING',
+                currency: 'USD',
+                language: 'en',
+                permissions: isSuperAdmin ? ['manage_users', 'manage_categories', 'export_data', 'view_admin_panel'] : [],
+                created_at: new Date().toISOString(),
+              };
+              await setDoc(doc(db, 'users', firebaseUser.uid), {
+                ...userData,
+                created_at: serverTimestamp(),
+              });
+            }
           }
 
           if (userData.status === 'APPROVED') {

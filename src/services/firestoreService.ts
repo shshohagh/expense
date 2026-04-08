@@ -412,6 +412,40 @@ export const updateUserStatus = async (userId: string, status: string) => {
   }
 };
 
+export const adminCreateUser = async (userData: any) => {
+  try {
+    // Note: This only creates the Firestore document. 
+    // The user still needs to sign up via Firebase Auth to link their account.
+    const userRef = doc(db, 'users', userData.id || Math.random().toString(36).substring(7));
+    await setDoc(userRef, {
+      ...userData,
+      created_at: serverTimestamp(),
+    });
+    return userRef.id;
+  } catch (error) {
+    handleFirestoreError(error, 'CREATE', 'users');
+  }
+};
+
+export const adminUpdateUser = async (userId: string, userData: any) => {
+  try {
+    await updateDoc(doc(db, 'users', userId), {
+      ...userData,
+      updated_at: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, 'UPDATE', `users/${userId}`);
+  }
+};
+
+export const adminDeleteUser = async (userId: string) => {
+  try {
+    await deleteDoc(doc(db, 'users', userId));
+  } catch (error) {
+    handleFirestoreError(error, 'DELETE', `users/${userId}`);
+  }
+};
+
 export const subscribeToRolePermissions = (callback: (data: any[]) => void) => {
   return onSnapshot(collection(db, 'role_permissions'), (snapshot) => {
     const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -424,6 +458,41 @@ export const updateRolePermissions = async (role: string, permissions: string[])
     await setDoc(doc(db, 'role_permissions', role), { role, permissions }, { merge: true });
   } catch (error) {
     handleFirestoreError(error, 'UPDATE', `role_permissions/${role}`);
+  }
+};
+
+export const deleteRole = async (role: string) => {
+  try {
+    await deleteDoc(doc(db, 'role_permissions', role));
+  } catch (error) {
+    handleFirestoreError(error, 'DELETE', `role_permissions/${role}`);
+  }
+};
+
+export const renameRole = async (oldRole: string, newRole: string) => {
+  try {
+    const batch = writeBatch(db);
+    
+    // 1. Get current permissions
+    const roleDoc = await getDoc(doc(db, 'role_permissions', oldRole));
+    const permissions = roleDoc.exists() ? roleDoc.data().permissions : [];
+
+    // 2. Create new role
+    batch.set(doc(db, 'role_permissions', newRole), { role: newRole, permissions });
+
+    // 3. Update all users with this role
+    const usersQuery = query(collection(db, 'users'), where('role', '==', oldRole));
+    const usersSnapshot = await getDocs(usersQuery);
+    usersSnapshot.docs.forEach(userDoc => {
+      batch.update(userDoc.ref, { role: newRole });
+    });
+
+    // 4. Delete old role
+    batch.delete(doc(db, 'role_permissions', oldRole));
+
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, 'UPDATE', `role_permissions/rename/${oldRole}`);
   }
 };
 

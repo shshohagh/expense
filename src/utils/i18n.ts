@@ -21,7 +21,7 @@ const translations: Record<string, Record<string, string>> = {
     recurring: 'Recurring',
     budgets: 'Budgets',
     categories: 'Categories',
-    admin: 'Admin',
+    admin: 'ACL',
     profile: 'Profile',
     reports: 'Reports',
     logout: 'Logout',
