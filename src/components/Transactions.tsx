@@ -215,6 +215,7 @@ export default function Transactions() {
                 categoryId: '',
                 date: new Date().toISOString().split('T')[0],
                 description: '',
+                status: 'ACTIVE',
               });
               setShowModal(true);
             }}

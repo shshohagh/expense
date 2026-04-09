@@ -1,11 +1,10 @@
 import React, { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { motion } from 'motion/react';
-import { User, Lock, Save, CheckCircle, Eye, EyeOff, Globe, Coins, Download, Database, Upload, AlertTriangle, Camera, Loader2, X } from 'lucide-react';
+import { User, Lock, Save, CheckCircle, Eye, EyeOff, Globe, Coins, Download, Database, Upload, AlertTriangle, X } from 'lucide-react';
 import { currencies, languages } from '../utils/i18n';
 import { updatePassword, EmailAuthProvider, reauthenticateWithCredential } from 'firebase/auth';
-import { auth, storage } from '../firebase';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { auth } from '../firebase';
 
 export default function Profile() {
   const { user, updateUser } = useAuth();
@@ -16,7 +15,6 @@ export default function Profile() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [currentPassword, setCurrentPassword] = useState('');
-  const [uploadingPhoto, setUploadingPhoto] = useState(false);
   
   const [formData, setFormData] = useState({
     name: user?.name || '',
@@ -35,58 +33,6 @@ export default function Profile() {
   const handleRestore = async (e: React.ChangeEvent<HTMLInputElement>) => {
     alert('Restoring data to Firebase is currently being implemented.');
     e.target.value = '';
-  };
-
-  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !user?.id) return;
-
-    if (!file.type.startsWith('image/')) {
-      alert('Please upload an image file.');
-      return;
-    }
-    
-    // Limit size for Base64 (around 500KB to stay safe within Firestore 1MB limit)
-    if (file.size > 500 * 1024) {
-      alert('File size should be less than 500KB for profile photos.');
-      return;
-    }
-
-    setUploadingPhoto(true);
-    try {
-      // Try Storage first
-      try {
-        const storageRef = ref(storage, `users/${user.id}/profile_${Date.now()}`);
-        await uploadBytes(storageRef, file);
-        const url = await getDownloadURL(storageRef);
-        setFormData(prev => ({ ...prev, photoURL: url }));
-        setMessage('Photo uploaded to cloud successfully!');
-      } catch (storageError) {
-        console.warn('Storage upload failed, falling back to Base64:', storageError);
-        
-        // Fallback to Base64
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          const base64String = reader.result as string;
-          setFormData(prev => ({ ...prev, photoURL: base64String }));
-          setMessage('Photo processed locally (Storage unavailable). Don\'t forget to save changes.');
-          setUploadingPhoto(false);
-        };
-        reader.onerror = () => {
-          alert('Failed to read file locally.');
-          setUploadingPhoto(false);
-        };
-        reader.readAsDataURL(file);
-        return; // Exit early as reader is async
-      }
-    } catch (error: any) {
-      console.error(error);
-      alert('Failed to process photo: ' + error.message);
-    } finally {
-      // If we didn't exit early via reader, stop loading
-      if (!file.type.startsWith('image/')) setUploadingPhoto(false);
-      else if (formData.photoURL.startsWith('http')) setUploadingPhoto(false);
-    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -180,34 +126,13 @@ export default function Profile() {
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium">Photo URL</label>
-                <div className="flex gap-3">
-                  <div className="relative flex-1">
-                    <input
-                      type="url"
-                      value={formData.photoURL}
-                      onChange={(e) => setFormData({ ...formData, photoURL: e.target.value })}
-                      className="w-full px-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100"
-                      placeholder="https://example.com/photo.jpg"
-                    />
-                  </div>
-                  <div className="relative">
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={handlePhotoUpload}
-                      disabled={uploadingPhoto}
-                      className="absolute inset-0 opacity-0 cursor-pointer disabled:cursor-not-allowed"
-                    />
-                    <button
-                      type="button"
-                      disabled={uploadingPhoto}
-                      className="flex items-center justify-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-800 rounded-xl text-sm font-medium hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all disabled:opacity-50"
-                    >
-                      {uploadingPhoto ? <Loader2 size={18} className="animate-spin" /> : <Camera size={18} />}
-                      <span className="hidden sm:inline">Upload</span>
-                    </button>
-                  </div>
-                </div>
+                <input
+                  type="url"
+                  value={formData.photoURL}
+                  onChange={(e) => setFormData({ ...formData, photoURL: e.target.value })}
+                  className="w-full px-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100"
+                  placeholder="https://example.com/photo.jpg"
+                />
                 {formData.photoURL && (
                   <div className="mt-2 flex items-center gap-4 p-3 bg-zinc-50 dark:bg-zinc-800/50 rounded-2xl border border-zinc-200 dark:border-zinc-800">
                     <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-white dark:border-zinc-700 shadow-sm">

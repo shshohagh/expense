@@ -69,6 +69,7 @@ export const addTransaction = async (transaction: Omit<Transaction, 'id' | 'crea
   try {
     const docRef = await addDoc(collection(db, 'transactions'), {
       ...transaction,
+      status: transaction.status || 'ACTIVE',
       created_at: serverTimestamp(),
       deleted_at: null
     });

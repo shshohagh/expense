@@ -1,11 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { User } from '../types';
-import { Shield, User as UserIcon, Plus, Edit2, X, Eye, EyeOff, Lock, Check, AlertCircle, FileText, FileSpreadsheet, Trash2, Camera, Loader2 } from 'lucide-react';
+import { Shield, User as UserIcon, Plus, Edit2, X, Eye, EyeOff, Lock, Check, AlertCircle, FileText, FileSpreadsheet, Trash2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
-import { storage } from '../firebase';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { 
   subscribeToUsers, 
   updateUserStatus, 
@@ -44,7 +42,6 @@ export default function AdminPanel() {
   const [isAddingRole, setIsAddingRole] = useState(false);
   const [newRoleName, setNewRoleName] = useState('');
   const [renamingRole, setRenamingRole] = useState<{ oldName: string, newName: string } | null>(null);
-  const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [confirmModal, setConfirmModal] = useState<{
     isOpen: boolean;
     title: string;
@@ -266,58 +263,6 @@ export default function AdminPanel() {
       phoneNumber: user.phoneNumber || ''
     });
     setIsModalOpen(true);
-  };
-
-  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    if (!file.type.startsWith('image/')) {
-      setNotification({ message: 'Please upload an image file', type: 'error' });
-      return;
-    }
-    
-    // Limit size for Base64 (around 500KB to stay safe within Firestore 1MB limit)
-    if (file.size > 500 * 1024) {
-      setNotification({ message: 'File size should be less than 500KB', type: 'error' });
-      return;
-    }
-
-    setUploadingPhoto(true);
-    try {
-      // Try Storage first
-      try {
-        const storageRef = ref(storage, `users/admin_upload_${Date.now()}`);
-        await uploadBytes(storageRef, file);
-        const url = await getDownloadURL(storageRef);
-        setFormData(prev => ({ ...prev, photoURL: url }));
-        setNotification({ message: 'Photo uploaded to cloud successfully', type: 'success' });
-      } catch (storageError) {
-        console.warn('Storage upload failed, falling back to Base64:', storageError);
-        
-        // Fallback to Base64
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          const base64String = reader.result as string;
-          setFormData(prev => ({ ...prev, photoURL: base64String }));
-          setNotification({ message: 'Photo processed locally (Storage unavailable)', type: 'info' });
-          setUploadingPhoto(false);
-        };
-        reader.onerror = () => {
-          setNotification({ message: 'Failed to read file locally', type: 'error' });
-          setUploadingPhoto(false);
-        };
-        reader.readAsDataURL(file);
-        return; // Exit early as reader is async
-      }
-    } catch (error: any) {
-      console.error(error);
-      setNotification({ message: 'Failed to process photo', type: 'error' });
-    } finally {
-      // If we didn't exit early via reader, stop loading
-      if (!file.type.startsWith('image/')) setUploadingPhoto(false);
-      else if (formData.photoURL.startsWith('http')) setUploadingPhoto(false);
-    }
   };
 
   const exportUsersCSV = () => {
@@ -817,33 +762,13 @@ export default function AdminPanel() {
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Photo URL</label>
-                  <div className="flex gap-3">
-                    <div className="relative flex-1">
-                      <input
-                        type="url"
-                        value={formData.photoURL}
-                        onChange={(e) => setFormData({ ...formData, photoURL: e.target.value })}
-                        className="w-full px-4 py-2 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100"
-                        placeholder="https://example.com/photo.jpg"
-                      />
-                    </div>
-                    <div className="relative">
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={handlePhotoUpload}
-                        disabled={uploadingPhoto}
-                        className="absolute inset-0 opacity-0 cursor-pointer disabled:cursor-not-allowed"
-                      />
-                      <button
-                        type="button"
-                        disabled={uploadingPhoto}
-                        className="flex items-center justify-center gap-2 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-800 rounded-xl text-sm font-medium hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all disabled:opacity-50"
-                      >
-                        {uploadingPhoto ? <Loader2 size={18} className="animate-spin" /> : <Camera size={18} />}
-                      </button>
-                    </div>
-                  </div>
+                  <input
+                    type="url"
+                    value={formData.photoURL}
+                    onChange={(e) => setFormData({ ...formData, photoURL: e.target.value })}
+                    className="w-full px-4 py-2 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100"
+                    placeholder="https://example.com/photo.jpg"
+                  />
                   {formData.photoURL && (
                     <div className="mt-2 flex items-center gap-4 p-2 bg-zinc-50 dark:bg-zinc-800/50 rounded-xl border border-zinc-200 dark:border-zinc-800">
                       <div className="w-10 h-10 rounded-full overflow-hidden border border-zinc-200 dark:border-zinc-700 shadow-sm">
