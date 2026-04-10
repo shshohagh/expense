@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { Transaction, Category } from '../types';
 import { formatDate } from '../lib/utils';
 import { formatCurrency } from '../utils/i18n';
-import { Plus, Trash2, Edit2, Download, Filter } from 'lucide-react';
+import { Plus, Trash2, Edit2, Download, Filter, Copy } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   subscribeToTransactions, 
@@ -89,6 +89,19 @@ export default function Transactions() {
     } catch (error) {
       console.error(error);
     }
+  };
+
+  const handleDuplicate = (t: Transaction) => {
+    setEditingId(null);
+    setFormData({
+      type: t.type,
+      amount: t.amount.toString(),
+      categoryId: t.categoryId.toString(),
+      date: t.date,
+      description: t.description ? `${t.description} (Copy)` : '(Copy)',
+      status: t.status || 'ACTIVE',
+    });
+    setShowModal(true);
   };
 
   const handleDelete = (id: string) => {
@@ -270,11 +283,7 @@ export default function Transactions() {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="border-bottom border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-800/50">
-                <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Date</th>
-                <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Category</th>
                 <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Description</th>
-                <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Type</th>
-                <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Status</th>
                 <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground text-right">Amount</th>
                 <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground text-right">Actions</th>
               </tr>
@@ -282,30 +291,34 @@ export default function Transactions() {
             <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
               {filteredTransactions.map((t) => (
                 <tr key={t.id} className={`hover:bg-zinc-50/50 dark:hover:bg-zinc-800/50 transition-colors ${t.status === 'INACTIVE' ? 'opacity-50 grayscale-[0.5]' : ''}`}>
-                  <td className="px-6 py-4 text-sm">{formatDate(t.date)}</td>
-                  <td className="px-6 py-4 text-sm font-medium">{(t as any).categoryName || 'Unknown'}</td>
-                  <td className="px-6 py-4 text-sm text-muted-foreground">{t.description || '-'}</td>
-                  <td className="px-6 py-4 text-sm">
-                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                      t.type === 'INCOME' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400' : 'bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-400'
-                    }`}>
-                      {t.type}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 text-sm">
-                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                      t.status === 'ACTIVE' ? 'bg-zinc-100 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-300' : 'bg-zinc-200 text-zinc-500 dark:bg-zinc-700 dark:text-zinc-500'
-                    }`}>
-                      {t.status}
-                    </span>
+                  <td className="px-6 py-4 text-sm text-muted-foreground">
+                    <div className="flex flex-col gap-1">
+                      <span>{t.description || '-'}</span>
+                      <span className={`inline-flex items-center w-fit px-2.5 py-0.5 rounded-full text-[10px] font-medium ${
+                        t.type === 'INCOME' ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400' : 'bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-400'
+                      }`}>
+                        {t.type}
+                      </span>
+                      <span>{(t as any).categoryName || 'Unknown'}</span>
+                    </div>
                   </td>
                   <td className={`px-6 py-4 text-sm font-bold text-right ${
                     t.type === 'INCOME' ? 'text-emerald-600' : 'text-rose-600'
                   }`}>
-                    {t.type === 'INCOME' ? '+' : '-'}{formatCurrency(t.amount, currency, lang)}
+                  <div className="flex flex-col gap-1">
+                    <span>{t.type === 'INCOME' ? '+' : '-'}{formatCurrency(t.amount, currency, lang)}</span>
+                    <span>{formatDate(t.date)}</span>
+                  </div>
                   </td>
                   <td className="px-6 py-4 text-right">
                     <div className="flex items-center justify-end gap-2">
+                      <button 
+                        onClick={() => handleDuplicate(t)}
+                        className="p-2 text-muted-foreground hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
+                        title="Duplicate"
+                      >
+                        <Copy size={16} />
+                      </button>
                       <button 
                         onClick={() => {
                           setEditingId(t.id);

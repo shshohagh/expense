@@ -343,7 +343,7 @@ export default function RecurringTransactions() {
                     {rt.type === 'INCOME' ? '+' : '-'}{formatCurrency(rt.amount, currency, lang)}
                   </p>
                 </div>
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="flex items-center gap-1">
                   <button
                     onClick={() => handleDuplicate(rt)}
                     className="p-2 text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
