@@ -65,7 +65,6 @@ export default function AdminPanel() {
     password: '',
     role: 'USER',
     status: 'PENDING',
-    photoURL: '',
     phoneNumber: ''
   });
 
@@ -220,7 +219,6 @@ export default function AdminPanel() {
           email: formData.email,
           role: formData.role,
           status: formData.status,
-          photoURL: formData.photoURL,
           phoneNumber: formData.phoneNumber
         });
       } else {
@@ -235,13 +233,12 @@ export default function AdminPanel() {
           currency: 'USD',
           language: 'en',
           permissions: [],
-          photoURL: formData.photoURL,
           phoneNumber: formData.phoneNumber
         });
       }
       setIsModalOpen(false);
       setEditingUser(null);
-      setFormData({ name: '', email: '', password: '', role: 'USER', status: 'PENDING', photoURL: '', phoneNumber: '' });
+      setFormData({ name: '', email: '', password: '', role: 'USER', status: 'PENDING', phoneNumber: '' });
       setNotification({ message: editingUser ? 'User updated' : 'User created', type: 'success' });
     } catch (error) {
       console.error(error);
@@ -259,7 +256,6 @@ export default function AdminPanel() {
       password: '',
       role: user.role,
       status: user.status,
-      photoURL: user.photoURL || '',
       phoneNumber: user.phoneNumber || ''
     });
     setIsModalOpen(true);
@@ -458,16 +454,7 @@ export default function AdminPanel() {
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
                         <div className="w-8 h-8 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-zinc-500 overflow-hidden">
-                          {u.photoURL ? (
-                            <img 
-                              src={u.photoURL} 
-                              alt={u.name} 
-                              className="w-full h-full object-cover"
-                              referrerPolicy="no-referrer"
-                            />
-                          ) : (
-                            <UserIcon size={16} />
-                          )}
+                          <UserIcon size={16} />
                         </div>
                         <div>
                           <p className="text-sm font-medium">{u.name}</p>
@@ -759,38 +746,6 @@ export default function AdminPanel() {
                     className="w-full px-4 py-2 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100"
                     placeholder="name@example.com"
                   />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Photo URL</label>
-                  <input
-                    type="url"
-                    value={formData.photoURL}
-                    onChange={(e) => setFormData({ ...formData, photoURL: e.target.value })}
-                    className="w-full px-4 py-2 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100"
-                    placeholder="https://example.com/photo.jpg"
-                  />
-                  {formData.photoURL && (
-                    <div className="mt-2 flex items-center gap-4 p-2 bg-zinc-50 dark:bg-zinc-800/50 rounded-xl border border-zinc-200 dark:border-zinc-800">
-                      <div className="w-10 h-10 rounded-full overflow-hidden border border-zinc-200 dark:border-zinc-700 shadow-sm">
-                        <img 
-                          src={formData.photoURL} 
-                          alt="Preview" 
-                          className="w-full h-full object-cover"
-                          referrerPolicy="no-referrer"
-                        />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-[10px] text-muted-foreground truncate">{formData.photoURL}</p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setFormData({ ...formData, photoURL: '' })}
-                        className="p-1 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-lg transition-colors"
-                      >
-                        <X size={14} />
-                      </button>
-                    </div>
-                  )}
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Phone Number</label>

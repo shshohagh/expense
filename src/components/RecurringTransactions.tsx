@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { formatCurrency } from '../utils/i18n';
-import { Plus, Edit2, Trash2, X, RefreshCw, Calendar, Tag, ArrowUpCircle, ArrowDownCircle, Download, FileSpreadsheet, FileText, Search, Filter } from 'lucide-react';
+import { Plus, Edit2, Trash2, Copy, X, RefreshCw, Calendar, Tag, ArrowUpCircle, ArrowDownCircle, Download, FileSpreadsheet, FileText, Search, Filter } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
 import { 
@@ -141,6 +141,21 @@ export default function RecurringTransactions() {
       startDate: rt.startDate,
       nextDate: rt.nextDate,
       description: rt.description,
+      active: rt.active
+    });
+    setIsModalOpen(true);
+  };
+
+  const handleDuplicate = (rt: RecurringTransaction) => {
+    setEditingRT(null);
+    setFormData({
+      type: rt.type,
+      amount: rt.amount.toString(),
+      categoryId: rt.categoryId.toString(),
+      frequency: rt.frequency,
+      startDate: rt.startDate,
+      nextDate: rt.nextDate,
+      description: `${rt.description} (Copy)`,
       active: rt.active
     });
     setIsModalOpen(true);
@@ -328,16 +343,25 @@ export default function RecurringTransactions() {
                     {rt.type === 'INCOME' ? '+' : '-'}{formatCurrency(rt.amount, currency, lang)}
                   </p>
                 </div>
-                <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button
+                    onClick={() => handleDuplicate(rt)}
+                    className="p-2 text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
+                    title="Duplicate"
+                  >
+                    <Copy size={18} />
+                  </button>
                   <button
                     onClick={() => openEditModal(rt)}
-                    className="p-2 text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
+                    className="p-2 text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
+                    title="Edit"
                   >
                     <Edit2 size={18} />
                   </button>
                   <button
                     onClick={() => handleDelete(rt.id)}
-                    className="p-2 text-zinc-500 hover:text-rose-600 transition-colors"
+                    className="p-2 text-zinc-400 hover:text-rose-600 transition-colors"
+                    title="Delete"
                   >
                     <Trash2 size={18} />
                   </button>

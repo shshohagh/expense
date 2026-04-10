@@ -14,7 +14,6 @@ service cloud.firestore {
     //   - status: string (PENDING, APPROVED, REJECTED, CANCEL)
     //   - currency: string
     //   - language: string
-    //   - photoURL: string
     //   - phoneNumber: string
     //   - created_at: timestamp
     //   - deleted_at: timestamp
@@ -107,7 +106,7 @@ service cloud.firestore {
     }
 
     function isValidUser(data) {
-      return data.keys().hasOnly(['id', 'email', 'name', 'role', 'status', 'currency', 'language', 'permissions', 'created_at', 'deleted_at', 'updated_at', 'photoURL', 'phoneNumber']) &&
+      return data.keys().hasOnly(['id', 'email', 'name', 'role', 'status', 'currency', 'language', 'permissions', 'created_at', 'deleted_at', 'updated_at', 'phoneNumber']) &&
              data.email is string && data.email.size() > 0 && data.email.size() < 255 &&
              data.name is string && data.name.size() < 100 &&
              data.role in ['USER', 'ADMIN', 'SUPER_ADMIN'] &&

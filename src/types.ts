@@ -7,7 +7,6 @@ export interface User {
   currency: string;
   language: string;
   permissions: string[];
-  photoURL?: string;
   phoneNumber?: string;
   created_at: string;
 }

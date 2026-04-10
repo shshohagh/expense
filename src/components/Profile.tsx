@@ -22,7 +22,6 @@ export default function Profile() {
     confirmPassword: '',
     currency: user?.currency || 'USD',
     language: user?.language || 'en',
-    photoURL: user?.photoURL || '',
     phoneNumber: user?.phoneNumber || '',
   });
 
@@ -51,7 +50,6 @@ export default function Profile() {
         name: formData.name,
         currency: formData.currency,
         language: formData.language,
-        photoURL: formData.photoURL,
         phoneNumber: formData.phoneNumber,
       });
 
@@ -123,39 +121,6 @@ export default function Profile() {
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                   className="w-full px-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100"
                 />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Photo URL</label>
-                <input
-                  type="url"
-                  value={formData.photoURL}
-                  onChange={(e) => setFormData({ ...formData, photoURL: e.target.value })}
-                  className="w-full px-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100"
-                  placeholder="https://example.com/photo.jpg"
-                />
-                {formData.photoURL && (
-                  <div className="mt-2 flex items-center gap-4 p-3 bg-zinc-50 dark:bg-zinc-800/50 rounded-2xl border border-zinc-200 dark:border-zinc-800">
-                    <div className="w-12 h-12 rounded-full overflow-hidden border-2 border-white dark:border-zinc-700 shadow-sm">
-                      <img 
-                        src={formData.photoURL} 
-                        alt="Preview" 
-                        className="w-full h-full object-cover"
-                        referrerPolicy="no-referrer"
-                      />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-medium truncate">{formData.photoURL}</p>
-                      <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Preview</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setFormData({ ...formData, photoURL: '' })}
-                      className="p-1.5 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-900/20 rounded-lg transition-colors"
-                    >
-                      <X size={16} />
-                    </button>
-                  </div>
-                )}
               </div>
               <div className="space-y-2">
                 <label className="text-sm font-medium">Phone Number</label>
