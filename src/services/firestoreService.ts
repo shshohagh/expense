@@ -174,6 +174,17 @@ export const addBudget = async (budget: Omit<Budget, 'id' | 'created_at'>) => {
   }
 };
 
+export const updateBudget = async (id: string, data: Partial<Budget>) => {
+  try {
+    await updateDoc(doc(db, 'budgets', id), {
+      ...data,
+      updated_at: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, 'UPDATE', `budgets/${id}`);
+  }
+};
+
 export const deleteBudget = async (id: string) => {
   try {
     await updateDoc(doc(db, 'budgets', id), {

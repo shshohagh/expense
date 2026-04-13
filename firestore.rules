@@ -130,7 +130,7 @@ service cloud.firestore {
     }
 
     function isValidBudget(data) {
-      return data.keys().hasOnly(['userId', 'categoryId', 'categoryName', 'categoryType', 'amount', 'period', 'created_at', 'deleted_at', 'isDemo']) &&
+      return data.keys().hasOnly(['userId', 'categoryId', 'categoryName', 'categoryType', 'amount', 'period', 'created_at', 'deleted_at', 'updated_at', 'isDemo']) &&
              data.userId == request.auth.uid &&
              data.amount is number &&
              data.period in ['MONTHLY', 'YEARLY'];

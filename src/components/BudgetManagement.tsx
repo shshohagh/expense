@@ -10,6 +10,7 @@ import {
   subscribeToCategories, 
   subscribeToTransactions,
   addBudget,
+  updateBudget,
   deleteBudget
 } from '../services/firestoreService';
 
@@ -74,10 +75,7 @@ export default function BudgetManagement() {
 
     try {
       if (editingBudget) {
-        // Firestore update logic
-        // For simplicity, I'll just delete and re-add or implement updateBudget in service
-        // But I'll stick to the service pattern
-        // await updateBudget(editingBudget.id, budgetData);
+        await updateBudget(editingBudget.id, budgetData);
       } else {
         await addBudget(budgetData);
       }

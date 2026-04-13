@@ -24,6 +24,8 @@ export default function Transactions() {
   const [editingId, setEditingId] = useState<string | null>(null);
   
   const [dateFilter, setDateFilter] = useState<'today' | 'yesterday' | 'last7' | 'last30' | 'thisWeek' | 'thisMonth' | 'thisYear' | 'lifetime' | 'custom'>('lifetime');
+  const [typeFilter, setTypeFilter] = useState<'ALL' | 'INCOME' | 'EXPENSE'>('ALL');
+  const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
   const [customDateRange, setCustomDateRange] = useState({ start: '', end: '' });
 
   const [formData, setFormData] = useState({
@@ -175,6 +177,11 @@ export default function Transactions() {
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const startOfYear = new Date(now.getFullYear(), 0, 1);
 
+    const matchesType = typeFilter === 'ALL' || t.type === typeFilter;
+    const matchesCategory = categoryFilter === 'ALL' || t.categoryId === categoryFilter;
+
+    if (!matchesType || !matchesCategory) return false;
+
     switch (dateFilter) {
       case 'today':
         return t.date === todayStr;
@@ -257,6 +264,27 @@ export default function Transactions() {
           <option value="thisYear">This Year</option>
           <option value="lifetime">Lifetime</option>
           <option value="custom">Customize</option>
+        </select>
+
+        <select
+          value={typeFilter}
+          onChange={(e) => setTypeFilter(e.target.value as any)}
+          className="px-3 py-1.5 text-sm bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-800 rounded-lg focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100"
+        >
+          <option value="ALL">All Types</option>
+          <option value="INCOME">Income</option>
+          <option value="EXPENSE">Expense</option>
+        </select>
+
+        <select
+          value={categoryFilter}
+          onChange={(e) => setCategoryFilter(e.target.value)}
+          className="px-3 py-1.5 text-sm bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-800 rounded-lg focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100"
+        >
+          <option value="ALL">All Categories</option>
+          {categories.map(cat => (
+            <option key={cat.id} value={cat.id}>{cat.name}</option>
+          ))}
         </select>
 
         {dateFilter === 'custom' && (
