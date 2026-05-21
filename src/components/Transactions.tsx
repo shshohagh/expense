@@ -10,7 +10,9 @@ import {
   subscribeToCategories, 
   addTransaction, 
   updateTransaction, 
-  deleteTransaction 
+  deleteTransaction,
+  bulkUpdateTransactionStatus,
+  bulkDeleteTransactions
 } from '../services/firestoreService';
 
 export default function Transactions() {
@@ -22,6 +24,8 @@ export default function Transactions() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [itemToDelete, setItemToDelete] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
   
   const [dateFilter, setDateFilter] = useState<'today' | 'yesterday' | 'last7' | 'last30' | 'thisWeek' | 'thisMonth' | 'thisYear' | 'lifetime' | 'custom'>('lifetime');
   const [typeFilter, setTypeFilter] = useState<'ALL' | 'INCOME' | 'EXPENSE'>('ALL');
@@ -119,6 +123,43 @@ export default function Transactions() {
       setItemToDelete(null);
     } catch (error) {
       console.error(error);
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    try {
+      const currentIds = [...selectedIds];
+      setSelectedIds([]);
+      setShowBulkDeleteConfirm(false);
+      await bulkDeleteTransactions(currentIds);
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  const handleBulkStatusChange = async (status: 'ACTIVE' | 'INACTIVE') => {
+    try {
+      const currentIds = [...selectedIds];
+      setSelectedIds([]);
+      await bulkUpdateTransactionStatus(currentIds, status);
+    } catch (error) {
+      console.error(error);
+    }
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.length === filteredTransactions.length) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(filteredTransactions.map(t => t.id as string));
+    }
+  };
+
+  const toggleSelect = (id: string) => {
+    if (selectedIds.includes(id)) {
+      setSelectedIds(selectedIds.filter(i => i !== id));
+    } else {
+      setSelectedIds([...selectedIds, id]);
     }
   };
 
@@ -306,11 +347,53 @@ export default function Transactions() {
         )}
       </div>
 
+      <AnimatePresence>
+        {selectedIds.length > 0 && (
+          <motion.div 
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 10 }}
+            className="flex items-center justify-between p-4 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-2xl shadow-lg border border-zinc-200 dark:border-zinc-800"
+          >
+            <div className="flex items-center gap-4">
+              <span className="text-sm font-bold">{selectedIds.length} items selected</span>
+              <div className="h-4 w-[1px] bg-zinc-700 dark:bg-zinc-300"></div>
+              <button 
+                onClick={() => handleBulkStatusChange('ACTIVE')}
+                className="text-xs font-bold hover:underline"
+              >
+                Set Active
+              </button>
+              <button 
+                onClick={() => handleBulkStatusChange('INACTIVE')}
+                className="text-xs font-bold hover:underline"
+              >
+                Set Inactive
+              </button>
+            </div>
+            <button 
+              onClick={() => setShowBulkDeleteConfirm(true)}
+              className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-bold bg-rose-600 text-white rounded-lg hover:bg-rose-700 transition-colors"
+            >
+              <Trash2 size={14} /> Bulk Delete
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden shadow-sm">
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="border-bottom border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-800/50">
+                <th className="px-6 py-4 w-10">
+                  <input 
+                    type="checkbox" 
+                    checked={selectedIds.length === filteredTransactions.length && filteredTransactions.length > 0}
+                    onChange={toggleSelectAll}
+                    className="rounded border-zinc-300 text-zinc-900 focus:ring-zinc-900" 
+                  />
+                </th>
                 <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Description</th>
                 <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground text-right">Amount</th>
                 <th className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-muted-foreground text-right">Actions</th>
@@ -318,7 +401,15 @@ export default function Transactions() {
             </thead>
             <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
               {filteredTransactions.map((t) => (
-                <tr key={t.id} className={`hover:bg-zinc-50/50 dark:hover:bg-zinc-800/50 transition-colors ${t.status === 'INACTIVE' ? 'opacity-50 grayscale-[0.5]' : ''}`}>
+                <tr key={t.id} className={`hover:bg-zinc-50/50 dark:hover:bg-zinc-800/50 transition-colors ${t.status === 'INACTIVE' ? 'opacity-50 grayscale-[0.5]' : ''} ${selectedIds.includes(t.id as string) ? 'bg-zinc-50 dark:bg-zinc-800/50' : ''}`}>
+                  <td className="px-6 py-4">
+                    <input 
+                      type="checkbox" 
+                      checked={selectedIds.includes(t.id as string)}
+                      onChange={() => toggleSelect(t.id as string)}
+                      className="rounded border-zinc-300 text-zinc-900 focus:ring-zinc-900"
+                    />
+                  </td>
                   <td className="px-6 py-4 text-sm text-muted-foreground">
                     <div className="flex flex-col gap-1">
                       <span>{t.description || '-'}</span>
@@ -412,6 +503,39 @@ export default function Transactions() {
                   className="flex-1 px-4 py-2 text-sm font-medium bg-rose-600 text-white rounded-xl hover:bg-rose-700"
                 >
                   Delete
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showBulkDeleteConfirm && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="w-full max-w-sm bg-white dark:bg-zinc-900 rounded-2xl shadow-xl border border-zinc-200 dark:border-zinc-800 p-6 text-center"
+            >
+              <div className="w-12 h-12 bg-rose-100 dark:bg-rose-900/30 text-rose-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                <Trash2 size={24} />
+              </div>
+              <h3 className="text-lg font-bold mb-2">Bulk Delete Transactions</h3>
+              <p className="text-muted-foreground mb-6">Are you sure you want to delete {selectedIds.length} transactions? This action cannot be undone.</p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowBulkDeleteConfirm(false)}
+                  className="flex-1 px-4 py-2 text-sm font-medium bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleBulkDelete}
+                  className="flex-1 px-4 py-2 text-sm font-medium bg-rose-600 text-white rounded-xl hover:bg-rose-700"
+                >
+                  Delete Selected
                 </button>
               </div>
             </motion.div>

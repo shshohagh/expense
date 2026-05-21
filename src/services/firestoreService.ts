@@ -46,6 +46,18 @@ export const subscribeToTransactions = (userId: string, callback: (transactions:
       id: doc.id as any,
       ...doc.data()
     })) as Transaction[];
+    
+    // Sort transactions by date descending (latest first)
+    transactions.sort((a, b) => {
+      const dateA = new Date(a.date).getTime();
+      const dateB = new Date(b.date).getTime();
+      if (dateB !== dateA) return dateB - dateA;
+      
+      const createdA = (a as any).created_at?.toMillis?.() || 0;
+      const createdB = (b as any).created_at?.toMillis?.() || 0;
+      return createdB - createdA;
+    });
+
     callback(transactions);
   }, (error) => handleFirestoreError(error, 'LIST', 'transactions'));
 };
@@ -58,7 +70,20 @@ export const getTransactions = async (userId: string) => {
       where('deleted_at', '==', null)
     );
     const snapshot = await getDocs(q);
-    return snapshot.docs.map(doc => ({ id: doc.id as any, ...doc.data() })) as Transaction[];
+    const transactions = snapshot.docs.map(doc => ({ id: doc.id as any, ...doc.data() })) as Transaction[];
+    
+    // Sort transactions by date descending (latest first)
+    transactions.sort((a, b) => {
+      const dateA = new Date(a.date).getTime();
+      const dateB = new Date(b.date).getTime();
+      if (dateB !== dateA) return dateB - dateA;
+      
+      const createdA = (a as any).created_at?.toMillis?.() || 0;
+      const createdB = (b as any).created_at?.toMillis?.() || 0;
+      return createdB - createdA;
+    });
+    
+    return transactions;
   } catch (error) {
     handleFirestoreError(error, 'LIST', 'transactions');
     return [];
@@ -95,6 +120,32 @@ export const deleteTransaction = async (id: string) => {
     });
   } catch (error) {
     handleFirestoreError(error, 'DELETE', `transactions/${id}`);
+  }
+};
+
+export const bulkUpdateTransactionStatus = async (ids: string[], status: 'ACTIVE' | 'INACTIVE') => {
+  try {
+    const batch = writeBatch(db);
+    ids.forEach(id => {
+      batch.update(doc(db, 'transactions', id), { status });
+    });
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, 'UPDATE', 'transactions/bulk-status');
+  }
+};
+
+export const bulkDeleteTransactions = async (ids: string[]) => {
+  try {
+    const batch = writeBatch(db);
+    ids.forEach(id => {
+      batch.update(doc(db, 'transactions', id), {
+        deleted_at: serverTimestamp()
+      });
+    });
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, 'DELETE', 'transactions/bulk-delete');
   }
 };
 
@@ -240,6 +291,76 @@ export const deleteRecurringTransaction = async (id: string) => {
     });
   } catch (error) {
     handleFirestoreError(error, 'DELETE', `recurring_transactions/${id}`);
+  }
+};
+
+export const processRecurringTransactions = async (userId: string) => {
+  try {
+    const today = new Date();
+    const todayStr = today.toISOString().split('T')[0];
+    
+    const q = query(
+      collection(db, 'recurring_transactions'),
+      where('userId', '==', userId),
+      where('active', '==', true),
+      where('deleted_at', '==', null)
+    );
+    
+    const snapshot = await getDocs(q);
+    const batch = writeBatch(db);
+    let totalChanges = 0;
+    
+    for (const docSnapshot of snapshot.docs) {
+      const rt = docSnapshot.data();
+      let nextDate = new Date(rt.nextDate);
+      let rtHasChanges = false;
+      
+      // Safety check to prevent infinite loops if frequency is invalid or dates are messed up
+      let loopCount = 0;
+      const MAX_LOOPS = 50; 
+
+      while (nextDate.toISOString().split('T')[0] <= todayStr && loopCount < MAX_LOOPS) {
+        rtHasChanges = true;
+        totalChanges++;
+        loopCount++;
+
+        // Create inactive transaction
+        const transRef = doc(collection(db, 'transactions'));
+        batch.set(transRef, {
+          userId,
+          type: rt.type,
+          amount: rt.amount,
+          categoryId: rt.categoryId,
+          categoryName: rt.categoryName,
+          date: nextDate.toISOString().split('T')[0],
+          description: `Recurring: ${rt.description || 'Transaction'}`,
+          status: 'INACTIVE',
+          created_at: serverTimestamp(),
+          deleted_at: null
+        });
+        
+        // Update next date
+        if (rt.frequency === 'DAILY') nextDate.setDate(nextDate.getDate() + 1);
+        else if (rt.frequency === 'WEEKLY') nextDate.setDate(nextDate.getDate() + 7);
+        else if (rt.frequency === 'MONTHLY') nextDate.setMonth(nextDate.getMonth() + 1);
+        else if (rt.frequency === 'YEARLY') nextDate.setFullYear(nextDate.getFullYear() + 1);
+        else break; // Invalid frequency
+      }
+      
+      if (rtHasChanges) {
+        batch.update(docSnapshot.ref, {
+          nextDate: nextDate.toISOString().split('T')[0],
+          updated_at: serverTimestamp()
+        });
+      }
+    }
+    
+    if (totalChanges > 0) {
+      await batch.commit();
+      console.log(`Processed ${totalChanges} recurring transactions.`);
+    }
+  } catch (error) {
+    console.error('Failed to process recurring transactions:', error);
   }
 };
 

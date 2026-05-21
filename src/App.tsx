@@ -11,7 +11,7 @@ import UserActivity from './components/UserActivity';
 import Reports from './components/Reports';
 import BudgetManagement from './components/BudgetManagement';
 import Settings from './components/Settings';
-import { subscribeToTransactions, getTransactions } from './services/firestoreService';
+import { subscribeToTransactions, getTransactions, processRecurringTransactions } from './services/firestoreService';
 import { t, formatCurrency } from './utils/i18n';
 import { 
   LayoutDashboard, 
@@ -93,6 +93,12 @@ export default function App() {
       if (topBalanceTimeoutRef.current) clearTimeout(topBalanceTimeoutRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    if (isAuthenticated && user?.id) {
+      processRecurringTransactions(user.id.toString());
+    }
+  }, [isAuthenticated, user?.id]);
 
   if (isLoading) {
     return (
