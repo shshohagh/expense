@@ -9,8 +9,10 @@ import RecurringTransactions from './components/RecurringTransactions';
 import Profile from './components/Profile';
 import UserActivity from './components/UserActivity';
 import Reports from './components/Reports';
+import Ledger from './components/Ledger';
 import BudgetManagement from './components/BudgetManagement';
 import Settings from './components/Settings';
+import { Transaction } from './types';
 import { subscribeToTransactions, getTransactions, processRecurringTransactions } from './services/firestoreService';
 import { t, formatCurrency } from './utils/i18n';
 import { 
@@ -31,15 +33,18 @@ import {
   ChevronRight,
   Sun,
   Moon,
-  Settings as SettingsIcon
+  Settings as SettingsIcon,
+  BookOpen
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
-type View = 'dashboard' | 'transactions' | 'admin' | 'profile' | 'categories' | 'recurring' | 'activity' | 'reports' | 'budgets' | 'settings';
+type View = 'dashboard' | 'transactions' | 'admin' | 'profile' | 'categories' | 'recurring' | 'activity' | 'reports' | 'ledger' | 'monthly_cash_flow' | 'annual_breakdown' | 'budgets' | 'settings';
 
 export default function App() {
   const { isAuthenticated, isLoading, user, logout } = useAuth();
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [currentView, setCurrentView] = useState<View>('dashboard');
+  const [openMenus, setOpenMenus] = useState<Set<string>>(new Set(['reports']));
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
@@ -54,6 +59,16 @@ export default function App() {
 
   const lang = user?.language || 'en';
   const currency = user?.currency || 'USD';
+
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const unsubscribe = subscribeToTransactions(user.id.toString(), (data) => {
+      setTransactions(data);
+    });
+
+    return () => unsubscribe();
+  }, [user?.id]);
 
   useEffect(() => {
     if (theme === 'dark') {
@@ -116,7 +131,15 @@ export default function App() {
     { id: 'dashboard', label: t('dashboard', lang), icon: LayoutDashboard },
     { id: 'transactions', label: t('transactions', lang), icon: Receipt },
     { id: 'budgets', label: t('budgets', lang), icon: Target },
-    { id: 'reports', label: t('reports', lang), icon: FileText },
+    { 
+      id: 'reports', 
+      label: t('reports', lang), 
+      icon: FileText, 
+      hasChildren: true 
+    },
+    { id: 'ledger', label: 'Ledger', icon: BookOpen, parentId: 'reports' },
+    { id: 'monthly_cash_flow', label: 'Monthly Cash Flow', icon: FileText, parentId: 'reports' },
+    { id: 'annual_breakdown', label: 'Annual Breakdown', icon: FileText, parentId: 'reports' },
     { id: 'recurring', label: t('recurring', lang), icon: Repeat },
     { id: 'activity', label: 'Activity', icon: History },
     ...(user?.permissions?.includes('manage_categories') || user?.role === 'SUPER_ADMIN' ? [
@@ -193,29 +216,45 @@ export default function App() {
         }`}
       >
         <nav className="flex-1 px-3 py-6 space-y-1 overflow-y-auto scrollbar-hide">
-          {navItems.map((item) => (
-            <button
-              key={item.id}
-              onClick={() => setCurrentView(item.id as View)}
-              title={isSidebarCollapsed ? item.label : ''}
-              className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-medium transition-all group ${
-                currentView === item.id 
-                  ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 shadow-lg shadow-zinc-900/10' 
-                  : 'text-muted-foreground hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-white'
-              } ${isSidebarCollapsed ? 'justify-center' : ''}`}
-            >
-              <item.icon size={20} className="shrink-0" />
-              {!isSidebarCollapsed && (
-                <motion.span
-                  initial={{ opacity: 0, x: -10 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  className="truncate"
+              {navItems.filter((item: any) => !item.parentId || openMenus.has(item.parentId)).map((item: any) => (
+                <button
+                  key={item.id}
+                  onClick={() => {
+                    if (item.hasChildren) {
+                      const next = new Set(openMenus);
+                      if (next.has(item.id)) next.delete(item.id);
+                      else next.add(item.id);
+                      setOpenMenus(next);
+                    } else {
+                      setCurrentView(item.id as View);
+                    }
+                  }}
+                  title={isSidebarCollapsed ? item.label : ''}
+                  className={`w-full flex items-center justify-between px-3 py-3 rounded-xl text-sm font-medium transition-all group ${
+                    currentView === item.id 
+                      ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 shadow-lg shadow-zinc-900/10' 
+                      : 'text-muted-foreground hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-white'
+                  } ${isSidebarCollapsed ? 'justify-center' : ''} ${item.parentId ? 'ml-8' : ''}`}
                 >
-                  {item.label}
-                </motion.span>
-              )}
-            </button>
-          ))}
+                  <div className="flex items-center gap-3">
+                    <item.icon size={20} className="shrink-0" />
+                    {!isSidebarCollapsed && (
+                      <motion.span
+                        initial={{ opacity: 0, x: -10 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        className="truncate"
+                      >
+                        {item.label}
+                      </motion.span>
+                    )}
+                  </div>
+                  {item.hasChildren && !isSidebarCollapsed && (
+                    <span className="shrink-0">
+                      {openMenus.has(item.id) ? '▲' : '▼'}
+                    </span>
+                  )}
+                </button>
+              ))}
         </nav>
 
         <div className="p-3 border-t border-zinc-200 dark:border-zinc-800 space-y-2">
@@ -268,21 +307,35 @@ export default function App() {
               </div>
               
               <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto">
-                {navItems.map((item) => (
+                {navItems.filter((item: any) => !item.parentId || openMenus.has(item.parentId)).map((item: any) => (
                   <button
                     key={item.id}
                     onClick={() => {
-                      setCurrentView(item.id as View);
-                      setIsMobileMenuOpen(false);
+                      if (item.hasChildren) {
+                        const next = new Set(openMenus);
+                        if (next.has(item.id)) next.delete(item.id);
+                        else next.add(item.id);
+                        setOpenMenus(next);
+                      } else {
+                        setCurrentView(item.id as View);
+                        setIsMobileMenuOpen(false);
+                      }
                     }}
-                    className={`w-full flex items-center gap-4 px-4 py-4 rounded-2xl text-base font-medium transition-all ${
+                    className={`w-full flex items-center justify-between px-4 py-4 rounded-2xl text-base font-medium transition-all ${
                       currentView === item.id 
                         ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 shadow-lg' 
                         : 'text-muted-foreground hover:bg-zinc-100 dark:hover:bg-zinc-800'
-                    }`}
+                    } ${item.parentId ? 'ml-8' : ''}`}
                   >
-                    <item.icon size={22} />
-                    {item.label}
+                    <div className="flex items-center gap-4">
+                      <item.icon size={22} />
+                      {item.label}
+                    </div>
+                    {item.hasChildren && (
+                      <span className="shrink-0">
+                        {openMenus.has(item.id) ? '▲' : '▼'}
+                      </span>
+                    )}
                   </button>
                 ))}
               </nav>
@@ -319,6 +372,9 @@ export default function App() {
               {currentView === 'dashboard' && <Dashboard />}
               {currentView === 'transactions' && <Transactions />}
               {currentView === 'recurring' && <RecurringTransactions />}
+              {currentView === 'ledger' && <Ledger transactions={transactions} currency={currency} lang={lang} />}
+              {currentView === 'monthly_cash_flow' && <Reports focusedReport="monthly" />}
+              {currentView === 'annual_breakdown' && <Reports focusedReport="annual" />}
               {currentView === 'categories' && <CategoryManagement />}
               {currentView === 'admin' && <AdminPanel />}
               {currentView === 'profile' && <Profile />}

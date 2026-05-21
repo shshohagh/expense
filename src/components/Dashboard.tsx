@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { Transaction, Budget } from '../types';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
-  PieChart, Pie, Cell, Legend 
+  PieChart, Pie, Cell, Legend, AreaChart, Area
 } from 'recharts';
 import { formatCurrency, t } from '../utils/i18n';
 import { 
@@ -19,6 +19,7 @@ export default function Dashboard() {
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [loading, setLoading] = useState(true);
   const [showBalance, setShowBalance] = useState(false);
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const timeoutRef = React.useRef<NodeJS.Timeout | null>(null);
 
   const lang = user?.language || 'en';
@@ -114,6 +115,33 @@ export default function Dashboard() {
       }
       return acc;
     }, []);
+
+  const getMonthlySavingsData = () => {
+    const data = [];
+    for (let i = 0; i < 12; i++) {
+      const monthTransactions = activeTransactions.filter(t => {
+        const d = new Date(t.date);
+        return d.getMonth() === i && d.getFullYear() === selectedYear;
+      });
+      data.push({
+        name: new Date(selectedYear, i).toLocaleString('default', { month: 'short' }),
+        income: monthTransactions.filter(t => t.type === 'INCOME').reduce((acc, t) => acc + t.amount, 0),
+        expense: monthTransactions.filter(t => t.type === 'EXPENSE').reduce((acc, t) => acc + t.amount, 0),
+      });
+    }
+    return data;
+  };
+
+  const getYearlyTopExpenses = () => {
+    return activeTransactions
+      .filter(t => {
+        const d = new Date(t.date);
+        return d.getFullYear() === selectedYear;
+      })
+      .filter(t => t.type === 'EXPENSE')
+      .sort((a, b) => b.amount - a.amount)
+      .slice(0, 10);
+  };
 
   const COLORS = ['#10b981', '#ef4444', '#3b82f6', '#f59e0b', '#8b5cf6', '#ec4899'];
 
@@ -340,6 +368,99 @@ export default function Dashboard() {
               </PieChart>
             </ResponsiveContainer>
           </div>
+        </div>
+      </div>
+
+      {/* Moved from Reports: Net Savings Trend & Top Expenses */}
+      <div className="grid gap-8 lg:grid-cols-3">
+        <div className="lg:col-span-2">
+          <motion.div 
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="p-6 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm"
+          >
+            <div className="flex items-center justify-between mb-8">
+              <h3 className="text-lg font-bold text-zinc-900 dark:text-white">Net Savings Trend</h3>
+              <div className="flex items-center gap-4 text-xs font-bold uppercase tracking-wider">
+                <span className="text-zinc-500">Yearly Breakdown ({selectedYear})</span>
+              </div>
+            </div>
+            <div className="h-[300px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={getMonthlySavingsData()}>
+                  <defs>
+                    <linearGradient id="colorSavings0" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.1}/>
+                      <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" strokeOpacity={0.5} />
+                  <XAxis 
+                    dataKey="name" 
+                    axisLine={false} 
+                    tickLine={false} 
+                    tick={{ fontSize: 12, fill: '#94a3b8' }}
+                  />
+                  <YAxis 
+                    axisLine={false} 
+                    tickLine={false} 
+                    tick={{ fontSize: 12, fill: '#94a3b8' }}
+                    tickFormatter={(value) => formatCurrency(value, currency, lang, { maximumFractionDigits: 0 })} 
+                  />
+                  <Tooltip 
+                    contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)' }}
+                    formatter={(value: number) => formatCurrency(value, currency, lang)}
+                  />
+                  <Area 
+                    type="monotone" 
+                    dataKey={(d) => d.income - d.expense} 
+                    name="Savings"
+                    stroke="#3b82f6" 
+                    fillOpacity={1} 
+                    fill="url(#colorSavings0)" 
+                    strokeWidth={3} 
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          </motion.div>
+        </div>
+
+        <div className="lg:col-span-1">
+          <motion.div 
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="p-6 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm flex flex-col justify-between"
+          >
+            <div>
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-lg font-bold">Top Expenses for {selectedYear}</h3>
+                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Top 10</span>
+              </div>
+              <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1">
+                {getYearlyTopExpenses().length > 0 ? (
+                  getYearlyTopExpenses().map((t) => (
+                    <div key={t.id} className="flex items-center justify-between p-2 hover:bg-zinc-50 dark:hover:bg-zinc-800/20 rounded-xl transition-colors">
+                      <div className="flex flex-col min-w-0">
+                        <span className="text-sm font-semibold truncate text-zinc-800 dark:text-zinc-200">{t.description || 'Expense'}</span>
+                        <span className="text-[10px] text-muted-foreground">{t.date}</span>
+                      </div>
+                      <div className="text-right flex flex-col items-end shrink-0">
+                        <span className="text-sm font-bold text-rose-500">{formatCurrency(t.amount, currency, lang)}</span>
+                        <span className="text-[9px] px-1.5 py-0.5 bg-zinc-100 dark:bg-zinc-800 rounded-lg text-zinc-500">
+                          {t.categoryName || 'Uncategorized'}
+                        </span>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-center py-12 text-muted-foreground italic text-sm">
+                    No expenses found for this period.
+                  </div>
+                )}
+              </div>
+            </div>
+          </motion.div>
         </div>
       </div>
     </div>

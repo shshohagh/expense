@@ -11,11 +11,11 @@ import { FileText, Download, Calendar, Filter, ChevronDown } from 'lucide-react'
 import { motion } from 'motion/react';
 import { subscribeToTransactions } from '../services/firestoreService';
 
-export default function Reports() {
+export default function Reports({ focusedReport }: { focusedReport?: 'monthly' | 'annual' }) {
   const { user } = useAuth();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
-  const [reportType, setReportType] = useState<'daily' | 'weekly' | 'monthly'>('monthly');
+  const [reportType, setReportType] = useState<'daily' | 'weekly' | 'monthly'>(focusedReport === 'monthly' ? 'monthly' : 'monthly');
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
 
@@ -254,135 +254,93 @@ export default function Reports() {
       <div className="grid gap-8 lg:grid-cols-3">
         <div className="lg:col-span-2 space-y-8">
           {/* Main Chart */}
-          <motion.div 
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="p-6 bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm"
-          >
-            <div className="flex items-center justify-between mb-8">
-              <h3 className="text-lg font-bold">
-                {reportType === 'daily' ? 'Daily' : reportType === 'weekly' ? 'Weekly' : 'Monthly'} Cash Flow
-              </h3>
-              <div className="flex items-center gap-4 text-xs font-bold uppercase tracking-wider">
-                <div className="flex items-center gap-1.5 text-emerald-500">
-                  <div className="w-2 h-2 bg-emerald-500 rounded-full"></div>
-                  <span>Income</span>
-                </div>
-                <div className="flex items-center gap-1.5 text-rose-500">
-                  <div className="w-2 h-2 bg-rose-500 rounded-full"></div>
-                  <span>Expense</span>
+          {focusedReport !== 'annual' && (
+            <motion.div 
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="p-6 bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm"
+            >
+              <div className="flex items-center justify-between mb-8">
+                <h3 className="text-lg font-bold">
+                  {reportType === 'daily' ? 'Daily' : reportType === 'weekly' ? 'Weekly' : 'Monthly'} Cash Flow
+                </h3>
+                <div className="flex items-center gap-4 text-xs font-bold uppercase tracking-wider">
+                  <div className="flex items-center gap-1.5 text-emerald-500">
+                    <div className="w-2 h-2 bg-emerald-500 rounded-full"></div>
+                    <span>Income</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-rose-500">
+                    <div className="w-2 h-2 bg-rose-500 rounded-full"></div>
+                    <span>Expense</span>
+                  </div>
                 </div>
               </div>
-            </div>
-            <div className="h-[400px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-                  <XAxis 
-                    dataKey={reportType === 'weekly' ? 'label' : 'name'} 
-                    axisLine={false} 
-                    tickLine={false} 
-                    tick={{ fontSize: 12, fill: '#94a3b8' }}
-                  />
-                  <YAxis 
-                    axisLine={false} 
-                    tickLine={false} 
-                    tick={{ fontSize: 12, fill: '#94a3b8' }}
-                    tickFormatter={(value) => formatCurrency(value, currency, lang, { maximumFractionDigits: 0 })} 
-                  />
-                  <Tooltip 
-                    cursor={{ fill: '#f8fafc' }}
-                    contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)' }}
-                    formatter={(value: number) => formatCurrency(value, currency, lang)}
-                  />
-                  <Bar dataKey="income" fill="#10b981" radius={[6, 6, 0, 0]} barSize={reportType === 'daily' ? 10 : 30} />
-                  <Bar dataKey="expense" fill="#ef4444" radius={[6, 6, 0, 0]} barSize={reportType === 'daily' ? 10 : 30} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </motion.div>
+              <div className="h-[400px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={chartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                    <XAxis 
+                      dataKey={reportType === 'weekly' ? 'label' : 'name'} 
+                      axisLine={false} 
+                      tickLine={false} 
+                      tick={{ fontSize: 12, fill: '#94a3b8' }}
+                    />
+                    <YAxis 
+                      axisLine={false} 
+                      tickLine={false} 
+                      tick={{ fontSize: 12, fill: '#94a3b8' }}
+                      tickFormatter={(value) => formatCurrency(value, currency, lang, { maximumFractionDigits: 0 })} 
+                    />
+                    <Tooltip 
+                      cursor={{ fill: '#f8fafc' }}
+                      contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)' }}
+                      formatter={(value: number) => formatCurrency(value, currency, lang)}
+                    />
+                    <Bar dataKey="income" fill="#10b981" radius={[6, 6, 0, 0]} barSize={reportType === 'daily' ? 10 : 30} />
+                    <Bar dataKey="expense" fill="#ef4444" radius={[6, 6, 0, 0]} barSize={reportType === 'daily' ? 10 : 30} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </motion.div>
+          )}
 
-          <motion.div 
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="p-6 bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm"
-          >
-            <h3 className="text-lg font-bold mb-8">Annual Monthly Breakdown ({selectedYear})</h3>
-            <div className="h-[300px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={getMonthlyData()} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-                  <XAxis 
-                    dataKey="name" 
-                    axisLine={false} 
-                    tickLine={false} 
-                    tick={{ fontSize: 12, fill: '#94a3b8' }}
-                  />
-                  <YAxis 
-                    axisLine={false} 
-                    tickLine={false} 
-                    tick={{ fontSize: 12, fill: '#94a3b8' }}
-                    tickFormatter={(value) => formatCurrency(value, currency, lang, { maximumFractionDigits: 0 })} 
-                  />
-                  <Tooltip 
-                    cursor={{ fill: '#f8fafc' }}
-                    contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)' }}
-                    formatter={(value: number) => formatCurrency(value, currency, lang)}
-                  />
-                  <Bar dataKey="income" fill="#10b981" radius={[6, 6, 0, 0]} barSize={20} />
-                  <Bar dataKey="expense" fill="#ef4444" radius={[6, 6, 0, 0]} barSize={20} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </motion.div>
+          {focusedReport !== 'monthly' && (
+            <motion.div 
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="p-6 bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm"
+            >
+              <h3 className="text-lg font-bold mb-8">Annual Monthly Breakdown ({selectedYear})</h3>
+              <div className="h-[300px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={getMonthlyData()} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                    <XAxis 
+                      dataKey="name" 
+                      axisLine={false} 
+                      tickLine={false} 
+                      tick={{ fontSize: 12, fill: '#94a3b8' }}
+                    />
+                    <YAxis 
+                      axisLine={false} 
+                      tickLine={false} 
+                      tick={{ fontSize: 12, fill: '#94a3b8' }}
+                      tickFormatter={(value) => formatCurrency(value, currency, lang, { maximumFractionDigits: 0 })} 
+                    />
+                    <Tooltip 
+                      cursor={{ fill: '#f8fafc' }}
+                      contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)' }}
+                      formatter={(value: number) => formatCurrency(value, currency, lang)}
+                    />
+                    <Bar dataKey="income" fill="#10b981" radius={[6, 6, 0, 0]} barSize={20} />
+                    <Bar dataKey="expense" fill="#ef4444" radius={[6, 6, 0, 0]} barSize={20} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </motion.div>
+          )}
 
-          {/* Savings Trend */}
-          <motion.div 
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 }}
-            className="p-6 bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm"
-          >
-            <h3 className="text-lg font-bold mb-8 text-zinc-900 dark:text-white">Net Savings Trend</h3>
-            <div className="h-[300px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={chartData}>
-                  <defs>
-                    <linearGradient id="colorSavings" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.1}/>
-                      <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-                  <XAxis 
-                    dataKey={reportType === 'weekly' ? 'label' : 'name'} 
-                    axisLine={false} 
-                    tickLine={false} 
-                    tick={{ fontSize: 12, fill: '#94a3b8' }}
-                  />
-                  <YAxis 
-                    axisLine={false} 
-                    tickLine={false} 
-                    tick={{ fontSize: 12, fill: '#94a3b8' }}
-                    tickFormatter={(value) => formatCurrency(value, currency, lang, { maximumFractionDigits: 0 })} 
-                  />
-                  <Tooltip 
-                    contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)' }}
-                    formatter={(value: number) => formatCurrency(value, currency, lang)}
-                  />
-                  <Area 
-                    type="monotone" 
-                    dataKey={(d) => d.income - d.expense} 
-                    name="Savings"
-                    stroke="#3b82f6" 
-                    fillOpacity={1} 
-                    fill="url(#colorSavings)" 
-                    strokeWidth={3} 
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          </motion.div>
+
         </div>
 
         <div className="space-y-8">
@@ -486,54 +444,8 @@ export default function Reports() {
         </div>
       </div>
 
-      {/* Top Expenses Table */}
-      <motion.div 
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.2 }}
-        className="bg-white dark:bg-zinc-900 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm overflow-hidden"
-      >
-        <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
-          <h3 className="text-lg font-bold">Top Expenses for {reportType === 'daily' ? new Date(selectedYear, selectedMonth).toLocaleString('default', { month: 'long' }) : selectedYear}</h3>
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Top 10 Transactions</span>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-zinc-50 dark:bg-zinc-800/50">
-                <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-muted-foreground">Date</th>
-                <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-muted-foreground">Category</th>
-                <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-muted-foreground">Description</th>
-                <th className="px-6 py-4 text-xs font-bold uppercase tracking-wider text-muted-foreground text-right">Amount</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-              {topExpenses.length > 0 ? (
-                topExpenses.map((t) => (
-                  <tr key={t.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/30 transition-colors">
-                    <td className="px-6 py-4 text-sm font-medium">{t.date}</td>
-                    <td className="px-6 py-4">
-                      <span className="px-2.5 py-1 bg-zinc-100 dark:bg-zinc-800 rounded-lg text-xs font-bold text-zinc-600 dark:text-zinc-400">
-                        {t.categoryName || 'Uncategorized'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 text-sm text-muted-foreground truncate max-w-[200px]">{t.description || '-'}</td>
-                    <td className="px-6 py-4 text-sm font-bold text-right text-rose-500">
-                      {formatCurrency(t.amount, currency, lang)}
-                    </td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan={4} className="px-6 py-12 text-center text-muted-foreground italic">
-                    No expenses found for this period.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </motion.div>
+
+
     </div>
   );
 }
