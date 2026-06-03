@@ -3,7 +3,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { Transaction, Category } from '../types';
 import { formatDate } from '../lib/utils';
 import { formatCurrency } from '../utils/i18n';
-import { Plus, Trash2, Edit2, Download, Filter, Copy } from 'lucide-react';
+import { Plus, Trash2, Edit2, Download, Filter, Copy, Upload } from 'lucide-react';
+import BankStatementImporter from './BankStatementImporter';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   subscribeToTransactions, 
@@ -26,6 +27,7 @@ export default function Transactions() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
+  const [showImporter, setShowImporter] = useState(false);
   
   const [dateFilter, setDateFilter] = useState<'today' | 'yesterday' | 'last7' | 'last30' | 'thisWeek' | 'thisMonth' | 'thisYear' | 'lifetime' | 'custom'>('lifetime');
   const [typeFilter, setTypeFilter] = useState<'ALL' | 'INCOME' | 'EXPENSE'>('ALL');
@@ -147,6 +149,29 @@ export default function Transactions() {
     }
   };
 
+  const handleImport = async (data: any[]) => {
+    try {
+      setShowImporter(false);
+      for (const row of data) {
+         // This is a naive implementation; mapping would need to be user-configurable in a production app
+         const transactionData = {
+           userId: user!.id.toString(),
+           type: ((row.Type || row.type || 'EXPENSE') === 'INCOME' ? 'INCOME' : 'EXPENSE') as 'INCOME' | 'EXPENSE',
+           amount: parseFloat(row.Amount || row.amount || '0'),
+           categoryId: '', // User would need to map categories
+           categoryName: row.Category || row.category || 'Imported',
+           date: row.Date || row.date || new Date().toISOString().split('T')[0],
+           description: row.Description || row.description || 'Imported Transaction',
+           status: 'ACTIVE' as 'ACTIVE' | 'INACTIVE',
+         };
+         await addTransaction(transactionData);
+      }
+    } catch (error) {
+      console.error(error);
+      alert('Error importing transactions');
+    }
+  };
+
   const toggleSelectAll = () => {
     if (selectedIds.length === filteredTransactions.length) {
       setSelectedIds([]);
@@ -255,6 +280,12 @@ export default function Transactions() {
           <p className="text-muted-foreground">Manage your income and expenses.</p>
         </div>
         <div className="flex items-center gap-2">
+          <button 
+            onClick={() => setShowImporter(true)}
+            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
+          >
+            <Upload size={16} /> Import
+          </button>
           <button 
             onClick={() => handleExport('csv')}
             className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
@@ -477,6 +508,8 @@ export default function Transactions() {
         </div>
       </div>
 
+      {showImporter && <BankStatementImporter onClose={() => setShowImporter(false)} onImport={handleImport} />}
+      
       <AnimatePresence>
         {showDeleteConfirm && (
           <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
