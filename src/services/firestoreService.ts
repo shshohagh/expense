@@ -16,7 +16,7 @@ import {
   writeBatch
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
-import { Transaction, Category, Budget, Loan, LoanRepayment } from '../types';
+import { Transaction, Category, Budget, Loan, LoanRepayment, Client, ClientLedger, Project, Subscription, Receivable, PaymentCollection } from '../types';
 
 // Helper to handle Firestore errors
 const handleFirestoreError = (error: any, operation: string, path: string) => {
@@ -739,3 +739,446 @@ export const deleteRepayment = async (id: string) => {
     handleFirestoreError(error, 'DELETE', `loan_repayments/${id}`);
   }
 };
+
+// --- Clients Management ---
+export const subscribeToClients = (userId: string, callback: (clients: Client[]) => void) => {
+  const q = query(
+    collection(db, 'clients'),
+    where('userId', '==', userId),
+    where('deleted_at', '==', null)
+  );
+
+  return onSnapshot(q, (snapshot) => {
+    const clients = snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    })) as Client[];
+    clients.sort((a, b) => a.name.localeCompare(b.name));
+    callback(clients);
+  }, (error) => handleFirestoreError(error, 'LIST', 'clients'));
+};
+
+export const addClient = async (client: Omit<Client, 'id' | 'created_at'>) => {
+  try {
+    const docRef = await addDoc(collection(db, 'clients'), {
+      ...client,
+      balance: client.balance || 0,
+      created_at: serverTimestamp(),
+      deleted_at: null
+    });
+    return docRef.id;
+  } catch (error) {
+    handleFirestoreError(error, 'CREATE', 'clients');
+  }
+};
+
+export const updateClient = async (id: string, data: Partial<Client>) => {
+  try {
+    await updateDoc(doc(db, 'clients', id), data);
+  } catch (error) {
+    handleFirestoreError(error, 'UPDATE', `clients/${id}`);
+  }
+};
+
+export const deleteClient = async (id: string) => {
+  try {
+    await updateDoc(doc(db, 'clients', id), {
+      deleted_at: serverTimestamp()
+    });
+  } catch (error) {
+    handleFirestoreError(error, 'DELETE', `clients/${id}`);
+  }
+};
+
+// --- Client Ledgers ---
+export const subscribeToClientLedgers = (userId: string, callback: (ledgers: ClientLedger[]) => void) => {
+  const q = query(
+    collection(db, 'client_ledgers'),
+    where('userId', '==', userId),
+    where('deleted_at', '==', null)
+  );
+
+  return onSnapshot(q, (snapshot) => {
+    const ledgers = snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    })) as ClientLedger[];
+    // Sort by date descending and secondary key
+    ledgers.sort((a, b) => {
+      const dateDiff = new Date(b.date).getTime() - new Date(a.date).getTime();
+      if (dateDiff === 0 && a.created_at && b.created_at) {
+        return b.created_at.seconds - a.created_at.seconds;
+      }
+      return dateDiff;
+    });
+    callback(ledgers);
+  }, (error) => handleFirestoreError(error, 'LIST', 'client_ledgers'));
+};
+
+export const addLedgerEntry = async (entry: Omit<ClientLedger, 'id' | 'created_at'>) => {
+  try {
+    const clientRef = doc(db, 'clients', entry.clientId);
+    const clientSnap = await getDoc(clientRef);
+    let currentBalance = 0;
+    if (clientSnap.exists()) {
+      currentBalance = clientSnap.data().balance || 0;
+    }
+
+    const updatedBalance = currentBalance + (entry.debit || 0) - (entry.credit || 0);
+    const batch = writeBatch(db);
+
+    const ledgerRef = doc(collection(db, 'client_ledgers'));
+    batch.set(ledgerRef, {
+      ...entry,
+      runningBalance: updatedBalance,
+      created_at: serverTimestamp(),
+      deleted_at: null
+    });
+
+    batch.update(clientRef, { balance: updatedBalance });
+    await batch.commit();
+    return ledgerRef.id;
+  } catch (error) {
+    handleFirestoreError(error, 'CREATE', 'client_ledgers');
+  }
+};
+
+export const deleteLedgerEntry = async (id: string) => {
+  try {
+    const ledgerRef = doc(db, 'client_ledgers', id);
+    const ledgerSnap = await getDoc(ledgerRef);
+    if (!ledgerSnap.exists()) return;
+
+    const data = ledgerSnap.data() as ClientLedger;
+    const clientRef = doc(db, 'clients', data.clientId);
+    const clientSnap = await getDoc(clientRef);
+    let currentBalance = 0;
+    if (clientSnap.exists()) {
+      currentBalance = clientSnap.data().balance || 0;
+    }
+
+    const revertedBalance = currentBalance - (data.debit || 0) + (data.credit || 0);
+    const batch = writeBatch(db);
+    batch.update(ledgerRef, { deleted_at: serverTimestamp() });
+    batch.update(clientRef, { balance: revertedBalance });
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, 'DELETE', `client_ledgers/${id}`);
+  }
+};
+
+// --- Projects ---
+export const subscribeToProjects = (userId: string, callback: (projects: Project[]) => void) => {
+  const q = query(
+    collection(db, 'projects'),
+    where('userId', '==', userId),
+    where('deleted_at', '==', null)
+  );
+
+  return onSnapshot(q, (snapshot) => {
+    const projects = snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    })) as Project[];
+    projects.sort((a, b) => new Date(b.deliveryDate).getTime() - new Date(a.deliveryDate).getTime());
+    callback(projects);
+  }, (error) => handleFirestoreError(error, 'LIST', 'projects'));
+};
+
+export const addProject = async (project: Omit<Project, 'id' | 'created_at'>) => {
+  try {
+    const docRef = await addDoc(collection(db, 'projects'), {
+      ...project,
+      created_at: serverTimestamp(),
+      deleted_at: null
+    });
+
+    // Create a corresponding ClientLedger entry for the project charge
+    await addLedgerEntry({
+      userId: project.userId,
+      clientId: project.clientId,
+      date: new Date().toISOString().split('T')[0],
+      type: 'Project Charge',
+      description: `Project Initial Charge: ${project.projectName}`,
+      debit: project.totalAmount,
+      credit: 0,
+      runningBalance: 0
+    });
+
+    // Create a corresponding Receivable entry if there's due balance
+    if (project.dueAmount > 0) {
+      await addReceivable({
+        userId: project.userId,
+        clientId: project.clientId,
+        clientName: project.clientName,
+        amount: project.dueAmount,
+        dueDate: project.deliveryDate,
+        description: `Due payment for Project: ${project.projectName}`,
+        status: 'Pending',
+        amountPaid: 0
+      });
+    }
+
+    return docRef.id;
+  } catch (error) {
+    handleFirestoreError(error, 'CREATE', 'projects');
+  }
+};
+
+export const updateProject = async (id: string, data: Partial<Project>) => {
+  try {
+    await updateDoc(doc(db, 'projects', id), data);
+  } catch (error) {
+    handleFirestoreError(error, 'UPDATE', `projects/${id}`);
+  }
+};
+
+export const deleteProject = async (id: string) => {
+  try {
+    await updateDoc(doc(db, 'projects', id), {
+      deleted_at: serverTimestamp()
+    });
+  } catch (error) {
+    handleFirestoreError(error, 'DELETE', `projects/${id}`);
+  }
+};
+
+// --- Subscriptions ---
+export const subscribeToSubscriptions = (userId: string, callback: (subscriptions: Subscription[]) => void) => {
+  const q = query(
+    collection(db, 'subscriptions'),
+    where('userId', '==', userId),
+    where('deleted_at', '==', null)
+  );
+
+  return onSnapshot(q, (snapshot) => {
+    const subscriptions = snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    })) as Subscription[];
+    subscriptions.sort((a, b) => new Date(b.renewalDate).getTime() - new Date(a.renewalDate).getTime());
+    callback(subscriptions);
+  }, (error) => handleFirestoreError(error, 'LIST', 'subscriptions'));
+};
+
+export const addSubscription = async (sub: Omit<Subscription, 'id' | 'created_at'>) => {
+  try {
+    const docRef = await addDoc(collection(db, 'subscriptions'), {
+      ...sub,
+      created_at: serverTimestamp(),
+      deleted_at: null
+    });
+
+    // Create entry in client_ledger
+    await addLedgerEntry({
+      userId: sub.userId,
+      clientId: sub.clientId,
+      date: sub.startDate,
+      type: 'Subscription Charge',
+      description: `Subscription Charge: ${sub.productName} (${sub.planName})`,
+      debit: sub.monthlyFee,
+      credit: 0,
+      runningBalance: 0
+    });
+
+    // Create a corresponding Receivable
+    await addReceivable({
+      userId: sub.userId,
+      clientId: sub.clientId,
+      clientName: sub.clientName,
+      amount: sub.monthlyFee,
+      dueDate: sub.renewalDate,
+      description: `Subscription Renewal Fee: ${sub.productName}`,
+      status: 'Pending',
+      amountPaid: 0
+    });
+
+    return docRef.id;
+  } catch (error) {
+    handleFirestoreError(error, 'CREATE', 'subscriptions');
+  }
+};
+
+export const updateSubscription = async (id: string, data: Partial<Subscription>) => {
+  try {
+    await updateDoc(doc(db, 'subscriptions', id), data);
+  } catch (error) {
+    handleFirestoreError(error, 'UPDATE', `subscriptions/${id}`);
+  }
+};
+
+export const deleteSubscription = async (id: string) => {
+  try {
+    await updateDoc(doc(db, 'subscriptions', id), {
+      deleted_at: serverTimestamp()
+    });
+  } catch (error) {
+    handleFirestoreError(error, 'DELETE', `subscriptions/${id}`);
+  }
+};
+
+// --- Receivables ---
+export const subscribeToReceivables = (userId: string, callback: (receivables: Receivable[]) => void) => {
+  const q = query(
+    collection(db, 'receivables'),
+    where('userId', '==', userId),
+    where('deleted_at', '==', null)
+  );
+
+  return onSnapshot(q, (snapshot) => {
+    const receivables = snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    })) as Receivable[];
+    receivables.sort((a, b) => new Date(b.dueDate).getTime() - new Date(a.dueDate).getTime());
+    callback(receivables);
+  }, (error) => handleFirestoreError(error, 'LIST', 'receivables'));
+};
+
+export const addReceivable = async (receivable: Omit<Receivable, 'id' | 'created_at'>) => {
+  try {
+    const docRef = await addDoc(collection(db, 'receivables'), {
+      ...receivable,
+      amountPaid: receivable.amountPaid || 0,
+      created_at: serverTimestamp(),
+      deleted_at: null
+    });
+    return docRef.id;
+  } catch (error) {
+    handleFirestoreError(error, 'CREATE', 'receivables');
+  }
+};
+
+export const updateReceivable = async (id: string, data: Partial<Receivable>) => {
+  try {
+    await updateDoc(doc(db, 'receivables', id), data);
+  } catch (error) {
+    handleFirestoreError(error, 'UPDATE', `receivables/${id}`);
+  }
+};
+
+export const deleteReceivable = async (id: string) => {
+  try {
+    await updateDoc(doc(db, 'receivables', id), {
+      deleted_at: serverTimestamp()
+    });
+  } catch (error) {
+    handleFirestoreError(error, 'DELETE', `receivables/${id}`);
+  }
+};
+
+// --- Payments ---
+export const subscribeToPayments = (userId: string, callback: (payments: PaymentCollection[]) => void) => {
+  const q = query(
+    collection(db, 'payments'),
+    where('userId', '==', userId),
+    where('deleted_at', '==', null)
+  );
+
+  return onSnapshot(q, (snapshot) => {
+    const payments = snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    })) as PaymentCollection[];
+    payments.sort((a, b) => new Date(b.paymentDate).getTime() - new Date(a.paymentDate).getTime());
+    callback(payments);
+  }, (error) => handleFirestoreError(error, 'LIST', 'payments'));
+};
+
+export const addPayment = async (pay: Omit<PaymentCollection, 'id' | 'created_at'>) => {
+  try {
+    const docRef = await addDoc(collection(db, 'payments'), {
+      ...pay,
+      created_at: serverTimestamp(),
+      deleted_at: null
+    });
+
+    // 1. Record ClientLedger entry of 'Payment Received' (credit = amount)
+    await addLedgerEntry({
+      userId: pay.userId,
+      clientId: pay.clientId,
+      date: pay.paymentDate,
+      type: 'Payment Received',
+      description: `Collection Received via ${pay.paymentMethod}${pay.transactionReference ? ` (Ref: ${pay.transactionReference})` : ''} - ${pay.notes || ''}`,
+      debit: 0,
+      credit: pay.amount,
+      runningBalance: 0
+    });
+
+    // 2. Adjust matching receivable ID if present
+    if (pay.receivableId) {
+      const recRef = doc(db, 'receivables', pay.receivableId);
+      const recSnap = await getDoc(recRef);
+      if (recSnap.exists()) {
+        const recData = recSnap.data() as Receivable;
+        const newPaid = (recData.amountPaid || 0) + pay.amount;
+        let newStatus: 'Pending' | 'Partial' | 'Paid' = 'Pending';
+        if (newPaid >= recData.amount) {
+          newStatus = 'Paid';
+        } else if (newPaid > 0) {
+          newStatus = 'Partial';
+        }
+        await updateDoc(recRef, {
+          amountPaid: newPaid,
+          status: newStatus
+        });
+      }
+    }
+
+    return docRef.id;
+  } catch (error) {
+    handleFirestoreError(error, 'CREATE', 'payments');
+  }
+};
+
+export const deletePayment = async (id: string) => {
+  try {
+    const payRef = doc(db, 'payments', id);
+    const paySnap = await getDoc(payRef);
+    if (!paySnap.exists()) return;
+
+    const payData = paySnap.data() as PaymentCollection;
+
+    // Soft delete the payment document
+    await updateDoc(payRef, { deleted_at: serverTimestamp() });
+
+    // Reverse payment entry in ledgers – we look for ledger entry for payment matches and soft delete it
+    // Or we record an Adjustment ledger entry. The cleaner way is creating a new Adjustment entry or deleting the matching ledger entry.
+    // Let's create an Adjustment entry to reverse the credit or search and delete the ledger record.
+    // To keep it simple and robust, let's post an 'Adjustment' ledger entry to re-debit the balance due to voided payment!
+    await addLedgerEntry({
+      userId: payData.userId,
+      clientId: payData.clientId,
+      date: new Date().toISOString().split('T')[0],
+      type: 'Adjustment',
+      description: `Reversal of Payment ${id} (Voided)`,
+      debit: payData.amount,
+      credit: 0,
+      runningBalance: 0
+    });
+
+    // If there was a receivableId linked, reverse the paid amount
+    if (payData.receivableId) {
+      const recRef = doc(db, 'receivables', payData.receivableId);
+      const recSnap = await getDoc(recRef);
+      if (recSnap.exists()) {
+        const recData = recSnap.data() as Receivable;
+        const newPaid = Math.max(0, (recData.amountPaid || 0) - payData.amount);
+        let newStatus: 'Pending' | 'Partial' | 'Paid' = 'Pending';
+        if (newPaid >= recData.amount) {
+          newStatus = 'Paid';
+        } else if (newPaid > 0) {
+          newStatus = 'Partial';
+        }
+        await updateDoc(recRef, {
+          amountPaid: newPaid,
+          status: newStatus
+        });
+      }
+    }
+
+  } catch (error) {
+    handleFirestoreError(error, 'DELETE', `payments/${id}`);
+  }
+};
+

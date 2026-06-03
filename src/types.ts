@@ -79,3 +79,96 @@ export interface LoanRepayment {
   deleted_at?: any;
   isDemo?: boolean;
 }
+
+export interface Client {
+  id: string;
+  userId: string;
+  name: string;
+  companyName?: string;
+  mobileNumber?: string;
+  whatsAppNumber?: string;
+  email?: string;
+  address?: string;
+  notes?: string;
+  balance: number; // outstanding running balance
+  created_at?: any;
+  deleted_at?: any;
+}
+
+export interface ClientLedger {
+  id: string;
+  userId: string;
+  clientId: string;
+  clientName?: string;
+  date: string;
+  type: 'Project Charge' | 'Subscription Charge' | 'Payment Received' | 'Adjustment' | 'Refund';
+  description: string;
+  debit: number;
+  credit: number;
+  runningBalance: number;
+  created_at?: any;
+  deleted_at?: any;
+}
+
+export interface Project {
+  id: string;
+  userId: string;
+  clientId: string;
+  clientName: string;
+  projectName: string;
+  totalAmount: number;
+  advanceAmount: number;
+  dueAmount: number;
+  deliveryDate: string;
+  status: 'In Progress' | 'Completed' | 'On Hold' | 'Cancelled' | 'Not Started';
+  notes?: string;
+  created_at?: any;
+  deleted_at?: any;
+}
+
+export interface Subscription {
+  id: string;
+  userId: string;
+  clientId: string;
+  clientName: string;
+  productName: string;
+  planName: string;
+  monthlyFee: number;
+  startDate: string;
+  renewalDate: string;
+  status: 'Active' | 'Inactive' | 'Cancelled' | 'Past Due';
+  notes?: string;
+  created_at?: any;
+  deleted_at?: any;
+}
+
+export interface Receivable {
+  id: string;
+  userId: string;
+  clientId: string;
+  clientName: string;
+  amount: number;
+  invoiceNumber?: string;
+  dueDate: string;
+  description: string;
+  status: 'Pending' | 'Partial' | 'Paid';
+  amountPaid: number;
+  created_at?: any;
+  deleted_at?: any;
+}
+
+export interface PaymentCollection {
+  id: string;
+  userId: string;
+  clientId: string;
+  clientName: string;
+  receivableId?: string;
+  amount: number;
+  paymentDate: string;
+  paymentMethod: 'Cash' | 'Bank Transfer' | 'Mobile Banking' | 'Check' | 'SaaS Gateway' | 'Other';
+  transactionReference?: string;
+  notes?: string;
+  created_at?: any;
+  deleted_at?: any;
+}
+

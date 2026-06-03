@@ -89,12 +89,128 @@
         "userId": { "type": "string" },
         "loanId": { "type": "string" },
         "repaymentAmount": { "type": "number" },
-        "repaymentDate": { "type": "string", "format": "date" },
+        "repaymentDate": { "type": "string" , "format": "date" },
         "note": { "type": "string" },
         "created_at": { "type": "string", "format": "date-time" },
         "deleted_at": { "type": "string", "format": "date-time" }
       },
       "required": ["userId", "loanId", "repaymentAmount", "repaymentDate"]
+    },
+    "Client": {
+      "title": "Client",
+      "description": "Developer's client record",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "name": { "type": "string" },
+        "companyName": { "type": "string" },
+        "mobileNumber": { "type": "string" },
+        "whatsAppNumber": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "address": { "type": "string" },
+        "notes": { "type": "string" },
+        "balance": { "type": "number" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "deleted_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "name", "balance"]
+    },
+    "ClientLedger": {
+      "title": "ClientLedger",
+      "description": "Ledger entry tracking client balances",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "clientId": { "type": "string" },
+        "clientName": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "type": { "type": "string", "enum": ["Project Charge", "Subscription Charge", "Payment Received", "Adjustment", "Refund"] },
+        "description": { "type": "string" },
+        "debit": { "type": "number" },
+        "credit": { "type": "number" },
+        "runningBalance": { "type": "number" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "deleted_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "clientId", "date", "type", "description", "debit", "credit", "runningBalance"]
+    },
+    "Project": {
+      "title": "Project",
+      "description": "Client custom software project tracking",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "clientId": { "type": "string" },
+        "clientName": { "type": "string" },
+        "projectName": { "type": "string" },
+        "totalAmount": { "type": "number" },
+        "advanceAmount": { "type": "number" },
+        "dueAmount": { "type": "number" },
+        "deliveryDate": { "type": "string", "format": "date" },
+        "status": { "type": "string", "enum": ["In Progress", "Completed", "On Hold", "Cancelled", "Not Started"] },
+        "notes": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "deleted_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "clientId", "clientName", "projectName", "totalAmount", "advanceAmount", "dueAmount", "deliveryDate", "status"]
+    },
+    "Subscription": {
+      "title": "Subscription",
+      "description": "POS or SaaS active software subscription tracker",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "clientId": { "type": "string" },
+        "clientName": { "type": "string" },
+        "productName": { "type": "string" },
+        "planName": { "type": "string" },
+        "monthlyFee": { "type": "number" },
+        "startDate": { "type": "string", "format": "date" },
+        "renewalDate": { "type": "string", "format": "date" },
+        "status": { "type": "string", "enum": ["Active", "Inactive", "Cancelled", "Past Due"] },
+        "notes": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "deleted_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "clientId", "clientName", "productName", "planName", "monthlyFee", "startDate", "renewalDate", "status"]
+    },
+    "Receivable": {
+      "title": "Receivable",
+      "description": "A payment receivable due invoice entry",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "clientId": { "type": "string" },
+        "clientName": { "type": "string" },
+        "amount": { "type": "number" },
+        "invoiceNumber": { "type": "string" },
+        "dueDate": { "type": "string", "format": "date" },
+        "description": { "type": "string" },
+        "status": { "type": "string", "enum": ["Pending", "Partial", "Paid"] },
+        "amountPaid": { "type": "number" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "deleted_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "clientId", "clientName", "amount", "dueDate", "description", "status", "amountPaid"]
+    },
+    "PaymentCollection": {
+      "title": "PaymentCollection",
+      "description": "Incoming cash payments collected from clients",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "clientId": { "type": "string" },
+        "clientName": { "type": "string" },
+        "receivableId": { "type": "string" },
+        "amount": { "type": "number" },
+        "paymentDate": { "type": "string", "format": "date" },
+        "paymentMethod": { "type": "string", "enum": ["Cash", "Bank Transfer", "Mobile Banking", "Check", "SaaS Gateway", "Other"] },
+        "transactionReference": { "type": "string" },
+        "notes": { "type": "string" },
+        "created_at": { "type": "string", "format": "date-time" },
+        "deleted_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "clientId", "clientName", "amount", "paymentDate", "paymentMethod"]
     }
   },
   "firestore": {
@@ -121,6 +237,30 @@
     "/loan_repayments/{repaymentId}": {
       "schema": "LoanRepayment",
       "description": "Repayments for lent money"
+    },
+    "/clients/{clientId}": {
+      "schema": "Client",
+      "description": "Developer client records"
+    },
+    "/client_ledgers/{ledgerId}": {
+      "schema": "ClientLedger",
+      "description": "Client standard ledgers entries"
+    },
+    "/projects/{projectId}": {
+      "schema": "Project",
+      "description": "Active client project records"
+    },
+    "/subscriptions/{subscriptionId}": {
+      "schema": "Subscription",
+      "description": "SaaS and POS subscriptions tracker"
+    },
+    "/receivables/{receivableId}": {
+      "schema": "Receivable",
+      "description": "Client invoice or payments due tracking"
+    },
+    "/payments/{paymentId}": {
+      "schema": "PaymentCollection",
+      "description": "Client cash collection entries"
     }
   }
 }

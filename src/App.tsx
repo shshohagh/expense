@@ -13,6 +13,7 @@ import Ledger from './components/Ledger';
 import BudgetManagement from './components/BudgetManagement';
 import Settings from './components/Settings';
 import Loans from './components/Loans';
+import ClientReceivables from './components/ClientReceivables';
 import { Transaction } from './types';
 import { subscribeToTransactions, getTransactions, processRecurringTransactions } from './services/firestoreService';
 import { t, formatCurrency } from './utils/i18n';
@@ -40,7 +41,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
-type View = 'dashboard' | 'transactions' | 'loans' | 'admin' | 'profile' | 'categories' | 'recurring' | 'activity' | 'reports' | 'ledger' | 'monthly_cash_flow' | 'annual_breakdown' | 'budgets' | 'settings';
+type View = 'dashboard' | 'transactions' | 'loans' | 'client_receivables' | 'admin' | 'profile' | 'categories' | 'recurring' | 'activity' | 'reports' | 'ledger' | 'monthly_cash_flow' | 'annual_breakdown' | 'budgets' | 'settings';
 
 export default function App() {
   const { isAuthenticated, isLoading, user, logout } = useAuth();
@@ -132,6 +133,7 @@ export default function App() {
   const navItems = [
     { id: 'dashboard', label: t('dashboard', lang), icon: LayoutDashboard },
     { id: 'transactions', label: t('transactions', lang), icon: Receipt },
+    { id: 'client_receivables', label: 'Client Receivables', icon: Users },
     { id: 'loans', label: 'Loans', icon: Coins },
     { id: 'budgets', label: t('budgets', lang), icon: Target },
     { 
@@ -374,6 +376,7 @@ export default function App() {
             >
               {currentView === 'dashboard' && <Dashboard />}
               {currentView === 'transactions' && <Transactions />}
+              {currentView === 'client_receivables' && <ClientReceivables />}
               {currentView === 'loans' && <Loans />}
               {currentView === 'recurring' && <RecurringTransactions />}
               {currentView === 'ledger' && <Ledger transactions={transactions} currency={currency} lang={lang} />}

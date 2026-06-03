@@ -170,6 +170,46 @@ service cloud.firestore {
              data.repaymentDate is string;
     }
 
+    function isValidClient(data) {
+      return data.userId == request.auth.uid &&
+             data.name is string && data.name.size() > 0 &&
+             data.balance is number;
+    }
+
+    function isValidClientLedger(data) {
+      return data.userId == request.auth.uid &&
+             data.clientId is string &&
+             data.type in ["Project Charge", "Subscription Charge", "Payment Received", "Adjustment", "Refund"];
+    }
+
+    function isValidProject(data) {
+      return data.userId == request.auth.uid &&
+             data.clientId is string &&
+             data.projectName is string && data.projectName.size() > 0 &&
+             data.status in ["In Progress", "Completed", "On Hold", "Cancelled", "Not Started"];
+    }
+
+    function isValidSubscription(data) {
+      return data.userId == request.auth.uid &&
+             data.clientId is string &&
+             data.productName is string &&
+             data.status in ["Active", "Inactive", "Cancelled", "Past Due"];
+    }
+
+    function isValidReceivable(data) {
+      return data.userId == request.auth.uid &&
+             data.clientId is string &&
+             data.amount is number &&
+             data.status in ["Pending", "Partial", "Paid"];
+    }
+
+    function isValidPayment(data) {
+      return data.userId == request.auth.uid &&
+             data.clientId is string &&
+             data.amount is number &&
+             data.paymentMethod in ["Cash", "Bank Transfer", "Mobile Banking", "Check", "SaaS Gateway", "Other"];
+    }
+
     // ===============================================================
     // Rules
     // ===============================================================
@@ -231,6 +271,48 @@ service cloud.firestore {
     match /role_permissions/{role} {
       allow read: if isApproved() || isAdmin();
       allow write: if isAdmin();
+    }
+
+    match /clients/{clientId} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isApproved() && isValidClient(request.resource.data);
+      allow update: if isApproved() && isValidClient(request.resource.data) && (isDocOwner() || isAdmin());
+      allow delete: if isApproved() && (isDocOwner() || isAdmin());
+    }
+
+    match /client_ledgers/{ledgerId} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isApproved() && isValidClientLedger(request.resource.data);
+      allow update: if isApproved() && isValidClientLedger(request.resource.data) && (isDocOwner() || isAdmin());
+      allow delete: if isApproved() && (isDocOwner() || isAdmin());
+    }
+
+    match /projects/{projectId} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isApproved() && isValidProject(request.resource.data);
+      allow update: if isApproved() && isValidProject(request.resource.data) && (isDocOwner() || isAdmin());
+      allow delete: if isApproved() && (isDocOwner() || isAdmin());
+    }
+
+    match /subscriptions/{subscriptionId} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isApproved() && isValidSubscription(request.resource.data);
+      allow update: if isApproved() && isValidSubscription(request.resource.data) && (isDocOwner() || isAdmin());
+      allow delete: if isApproved() && (isDocOwner() || isAdmin());
+    }
+
+    match /receivables/{receivableId} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isApproved() && isValidReceivable(request.resource.data);
+      allow update: if isApproved() && isValidReceivable(request.resource.data) && (isDocOwner() || isAdmin());
+      allow delete: if isApproved() && (isDocOwner() || isAdmin());
+    }
+
+    match /payments/{paymentId} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isApproved() && isValidPayment(request.resource.data);
+      allow update: if isApproved() && isValidPayment(request.resource.data) && (isDocOwner() || isAdmin());
+      allow delete: if isApproved() && (isDocOwner() || isAdmin());
     }
   }
 }
