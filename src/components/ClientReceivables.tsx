@@ -12,6 +12,7 @@ import {
   subscribeToProjects,
   addProject,
   updateProject,
+  editProjectAndSyncFinancials,
   deleteProject,
   subscribeToSubscriptions,
   addSubscription,
@@ -84,6 +85,8 @@ export default function ClientReceivables() {
   const [deleteModalOnConfirm, setDeleteModalOnConfirm] = useState<() => Promise<void>>(() => async () => {});
   const [isDeleting, setIsDeleting] = useState(false);
   const [editingSubscription, setEditingSubscription] = useState<Subscription | null>(null);
+  const [editingProject, setEditingProject] = useState<Project | null>(null);
+  const [isSavingProject, setIsSavingProject] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
 
@@ -207,7 +210,10 @@ export default function ClientReceivables() {
     advanceAmount: 0,
     deliveryDate: '',
     status: 'In Progress' as Project['status'],
-    notes: ''
+    notes: '',
+    projectType: '',
+    description: '',
+    startDate: ''
   });
 
   const [subscriptionForm, setSubscriptionForm] = useState({
@@ -383,15 +389,78 @@ export default function ClientReceivables() {
     return formatCurrency(amount, user?.currency || 'USD');
   };
 
-  // Metric computations for dashboard
-  const totalReceivable = clients.reduce((sum, c) => sum + (c.balance || 0), 0);
-  const totalCollected = payments.reduce((sum, p) => sum + (p.amount || 0), 0);
+  // 1. Dynamic client balances map computed directly from ledgers + clients in real-time
+  const clientBalancesMap = React.useMemo(() => {
+    const map: Record<string, number> = {};
+    // Initialize all existing clients to 0 so we always have a default fallback
+    clients.forEach(c => {
+      map[c.id] = 0;
+    });
+    // Sum debits and deduct credits for all non-deleted ledger entries of active clients
+    ledgers.forEach(l => {
+      if (map[l.clientId] !== undefined) {
+        map[l.clientId] += (l.debit || 0) - (l.credit || 0);
+      }
+    });
+    return map;
+  }, [clients, ledgers]);
+
+  // 2. Dashboard Metrics computed directly from live DB records
+  const totalReceivables = React.useMemo(() => {
+    return ledgers
+      .filter(l => clients.some(c => c.id === l.clientId))
+      .reduce((sum, l) => sum + (l.debit || 0), 0);
+  }, [ledgers, clients]);
+
+  const totalCollected = React.useMemo(() => {
+    return payments
+      .filter(p => clients.some(c => c.id === p.clientId))
+      .reduce((sum, p) => sum + (p.amount || 0), 0);
+  }, [payments, clients]);
+
+  const outstandingBalance = React.useMemo(() => {
+    return Math.max(0, totalReceivables - totalCollected);
+  }, [totalReceivables, totalCollected]);
+
+  const overdueAmount = React.useMemo(() => {
+    const today = new Date();
+    today.setHours(0,0,0,0);
+    return receivables
+      .filter(r => {
+        if (!clients.some(c => c.id === r.clientId)) return false;
+        if (r.status === 'Paid') return false;
+        return new Date(r.dueDate) < today;
+      })
+      .reduce((sum, r) => sum + Math.max(0, (r.amount || 0) - (r.amountPaid || 0)), 0);
+  }, [receivables, clients]);
+
+  const overdueClientsCount = React.useMemo(() => {
+    const today = new Date();
+    today.setHours(0,0,0,0);
+    const uniqueClientIds = new Set(
+      receivables
+        .filter(r => {
+          if (!clients.some(c => c.id === r.clientId)) return false;
+          if (r.status === 'Paid') return false;
+          return new Date(r.dueDate) < today;
+        })
+        .map(r => r.clientId)
+    );
+    return uniqueClientIds.size;
+  }, [receivables, clients]);
+
+  const activeClientsWithDueCount = React.useMemo(() => {
+    return clients.filter(c => {
+      const bal = clientBalancesMap[c.id] || 0;
+      return bal > 0.01;
+    }).length;
+  }, [clients, clientBalancesMap]);
+
+  // Compatibility aliases
+  const totalReceivable = outstandingBalance;
   const activeClientsCount = clients.length;
   const activeSubsCount = subscriptions.filter(s => s.status === 'Active').length;
-  const overdueReceivablesCount = receivables.filter(r => {
-    const isOverdue = new Date(r.dueDate) < new Date() && r.status !== 'Paid';
-    return isOverdue;
-  }).length;
+  const overdueReceivablesCount = overdueClientsCount;
 
   const upcomingRenewals = subscriptions.filter(s => {
     if (s.status !== 'Active') return false;
@@ -542,6 +611,23 @@ export default function ClientReceivables() {
     setShowClientModal(true);
   };
 
+  const handleEditProjectClick = (proj: Project) => {
+    setEditingProject(proj);
+    setProjectForm({
+      clientId: proj.clientId || '',
+      projectName: proj.projectName || '',
+      totalAmount: proj.totalAmount || 0,
+      advanceAmount: proj.advanceAmount || 0,
+      deliveryDate: proj.deliveryDate || '',
+      status: proj.status || 'In Progress',
+      notes: proj.notes || '',
+      projectType: proj.projectType || '',
+      description: proj.description || '',
+      startDate: proj.startDate || ''
+    });
+    setShowProjectModal(true);
+  };
+
   const handleCreateProject = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!projectForm.clientId || !projectForm.projectName.trim() || projectForm.totalAmount <= 0) return;
@@ -550,45 +636,94 @@ export default function ClientReceivables() {
     if (!matchedClient) return;
 
     const dueAmount = projectForm.totalAmount - projectForm.advanceAmount;
+    setIsSavingProject(true);
+    setErrorMessage('');
+    setSuccessMessage('');
 
-    const payload = {
-      userId,
-      clientId: projectForm.clientId,
-      clientName: matchedClient.name,
-      projectName: projectForm.projectName,
-      totalAmount: Number(projectForm.totalAmount),
-      advanceAmount: Number(projectForm.advanceAmount),
-      dueAmount: Math.max(0, dueAmount),
-      deliveryDate: projectForm.deliveryDate,
-      status: projectForm.status,
-      notes: projectForm.notes || ''
-    };
+    try {
+      if (editingProject) {
+        // Validate user owner
+        if (editingProject.userId !== userId) {
+          setErrorMessage("Unauthorized: You can only edit your own projects.");
+          setTimeout(() => setErrorMessage(''), 4000);
+          setIsSavingProject(false);
+          return;
+        }
 
-    await addProject(payload);
+        const payload: Partial<Project> = {
+          clientId: projectForm.clientId,
+          clientName: matchedClient.name,
+          projectName: projectForm.projectName,
+          totalAmount: Number(projectForm.totalAmount),
+          advanceAmount: Number(projectForm.advanceAmount),
+          dueAmount: Math.max(0, dueAmount),
+          deliveryDate: projectForm.deliveryDate,
+          status: projectForm.status,
+          notes: projectForm.notes || '',
+          projectType: projectForm.projectType || '',
+          description: projectForm.description || '',
+          startDate: projectForm.startDate || ''
+        };
 
-    // If an advance was paid trigger payment collection to deduct client ledger automatically
-    if (payload.advanceAmount > 0) {
-      await addPayment({
-        userId,
-        clientId: payload.clientId,
-        clientName: payload.clientName,
-        amount: payload.advanceAmount,
-        paymentDate: new Date().toISOString().split('T')[0],
-        paymentMethod: 'Cash',
-        notes: `Advance Payment for project ${payload.projectName}`
+        await editProjectAndSyncFinancials(editingProject.id, payload, editingProject);
+        setSuccessMessage("Project updated successfully!");
+        setTimeout(() => setSuccessMessage(''), 4000);
+      } else {
+        const payload = {
+          userId,
+          clientId: projectForm.clientId,
+          clientName: matchedClient.name,
+          projectName: projectForm.projectName,
+          totalAmount: Number(projectForm.totalAmount),
+          advanceAmount: Number(projectForm.advanceAmount),
+          dueAmount: Math.max(0, dueAmount),
+          deliveryDate: projectForm.deliveryDate,
+          status: projectForm.status,
+          notes: projectForm.notes || '',
+          projectType: projectForm.projectType || '',
+          description: projectForm.description || '',
+          startDate: projectForm.startDate || ''
+        };
+
+        await addProject(payload);
+
+        // If an advance was paid trigger payment collection to deduct client ledger automatically
+        if (payload.advanceAmount > 0) {
+          await addPayment({
+            userId,
+            clientId: payload.clientId,
+            clientName: payload.clientName,
+            amount: payload.advanceAmount,
+            paymentDate: new Date().toISOString().split('T')[0],
+            paymentMethod: 'Cash',
+            notes: `Advance Payment for project ${payload.projectName}`
+          });
+        }
+        setSuccessMessage("Project created successfully!");
+        setTimeout(() => setSuccessMessage(''), 4000);
+      }
+
+      setShowProjectModal(false);
+      setEditingProject(null);
+      setProjectForm({
+        clientId: '',
+        projectName: '',
+        totalAmount: 0,
+        advanceAmount: 0,
+        deliveryDate: '',
+        status: 'In Progress',
+        notes: '',
+        projectType: '',
+        description: '',
+        startDate: ''
       });
+    } catch (error) {
+      console.error(error);
+      setErrorMessage(editingProject ? "Failed to update project." : "Failed to create project.");
+      setTimeout(() => setErrorMessage(''), 4000);
+    } finally {
+      setIsSavingProject(false);
     }
-
-    setShowProjectModal(false);
-    setProjectForm({
-      clientId: '',
-      projectName: '',
-      totalAmount: 0,
-      advanceAmount: 0,
-      deliveryDate: '',
-      status: 'In Progress',
-      notes: ''
-    });
   };
 
   // --- Products Master Management Handlers ---
@@ -1060,60 +1195,88 @@ export default function ClientReceivables() {
       {activeTab === 'dashboard' && (
         <div className="space-y-6">
           {/* Dashboard Metrics BENTO GRID */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {/* Total Receivables Overdue */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {/* Total Receivables */}
             <div className="bg-white dark:bg-zinc-900 rounded-2xl p-5 border border-zinc-200 dark:border-zinc-800 flex justify-between items-start shadow-sm hover:scale-[1.01] transition-transform">
               <div className="space-y-1">
-                <span className="text-zinc-400 text-xs font-medium uppercase tracking-wider block">Total Outstanding</span>
-                <span className="text-2xl font-bold tracking-tight text-rose-500 dark:text-rose-400 font-sans block">
-                  {renderMoney(totalReceivable)}
+                <span className="text-zinc-400 text-xs font-medium uppercase tracking-wider block">Total Receivables</span>
+                <span className="text-2xl font-bold tracking-tight text-indigo-500 dark:text-indigo-400 font-sans block">
+                  {renderMoney(totalReceivables)}
                 </span>
-                <span className="text-xs text-zinc-500 block">Across {clients.filter(c => c.balance > 0).length} clients</span>
+                <span className="text-xs text-zinc-500 block">Total invoiced & opening balance debt</span>
               </div>
-              <div className="bg-rose-50 dark:bg-rose-900/20 text-rose-600 rounded-xl p-3">
+              <div className="bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 rounded-xl p-3">
                 <TrendingUp size={20} />
               </div>
             </div>
 
-            {/* Total Recovered */}
+            {/* Total Collected */}
             <div className="bg-white dark:bg-zinc-900 rounded-2xl p-5 border border-zinc-200 dark:border-zinc-800 flex justify-between items-start shadow-sm hover:scale-[1.01] transition-transform">
               <div className="space-y-1">
-                <span className="text-zinc-400 text-xs font-medium uppercase tracking-wider block">Total Collections</span>
+                <span className="text-zinc-400 text-xs font-medium uppercase tracking-wider block">Total Collected</span>
                 <span className="text-2xl font-bold tracking-tight text-emerald-500 dark:text-emerald-400 font-sans block">
                   {renderMoney(totalCollected)}
                 </span>
-                <span className="text-xs text-zinc-500 block">Total received to date</span>
+                <span className="text-xs text-zinc-500 block">Total standard payments cleared</span>
               </div>
               <div className="bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 rounded-xl p-3">
                 <DollarSign size={20} />
               </div>
             </div>
 
-            {/* Subscriptions */}
+            {/* Outstanding Balance */}
             <div className="bg-white dark:bg-zinc-900 rounded-2xl p-5 border border-zinc-200 dark:border-zinc-800 flex justify-between items-start shadow-sm hover:scale-[1.01] transition-transform">
               <div className="space-y-1">
-                <span className="text-zinc-400 text-xs font-medium uppercase tracking-wider block">Active Contracts</span>
-                <span className="text-2xl font-bold tracking-tight text-blue-500 dark:text-blue-400 font-sans block">
-                  {activeSubsCount}
+                <span className="text-zinc-400 text-xs font-medium uppercase tracking-wider block">Outstanding Balance</span>
+                <span className="text-2xl font-bold tracking-tight text-rose-500 dark:text-rose-400 font-sans block">
+                  {renderMoney(outstandingBalance)}
                 </span>
-                <span className="text-xs text-zinc-500 block">SaaS / POS SaaS Plans</span>
+                <span className="text-xs text-zinc-500 block">Unsettled accounts due to clear</span>
               </div>
-              <div className="bg-blue-50 dark:bg-blue-900/20 text-blue-600 rounded-xl p-3">
-                <CreditCard size={20} />
+              <div className="bg-rose-50 dark:bg-rose-900/20 text-rose-600 rounded-xl p-3">
+                <BookOpen size={20} />
               </div>
             </div>
 
-            {/* Overdue Items Alert */}
+            {/* Overdue Amount */}
             <div className="bg-white dark:bg-zinc-900 rounded-2xl p-5 border border-zinc-200 dark:border-zinc-800 flex justify-between items-start shadow-sm hover:scale-[1.01] transition-transform">
               <div className="space-y-1">
-                <span className="text-zinc-400 text-xs font-medium uppercase tracking-wider block">Overdue Payments</span>
-                <span className={`text-2xl font-bold tracking-tight font-sans block ${overdueReceivablesCount > 0 ? 'text-amber-500 animate-pulse' : 'text-zinc-500'}`}>
-                  {overdueReceivablesCount}
+                <span className="text-zinc-400 text-xs font-medium uppercase tracking-wider block">Overdue Amount</span>
+                <span className="text-2xl font-bold tracking-tight text-amber-500 dark:text-amber-400 font-sans block">
+                  {renderMoney(overdueAmount)}
                 </span>
-                <span className="text-xs text-zinc-500 block">Passed scheduled target dates</span>
+                <span className="text-xs text-zinc-500 block">Unpaid amount on overdue bills</span>
               </div>
               <div className="bg-amber-50 dark:bg-amber-900/20 text-amber-600 rounded-xl p-3">
                 <AlertCircle size={20} />
+              </div>
+            </div>
+
+            {/* Overdue Clients Count */}
+            <div className="bg-white dark:bg-zinc-900 rounded-2xl p-5 border border-zinc-200 dark:border-zinc-800 flex justify-between items-start shadow-sm hover:scale-[1.01] transition-transform">
+              <div className="space-y-1">
+                <span className="text-zinc-400 text-xs font-medium uppercase tracking-wider block">Overdue Clients Count</span>
+                <span className="text-2xl font-bold tracking-tight text-zinc-700 dark:text-zinc-250 font-sans block">
+                  {overdueClientsCount} Clients
+                </span>
+                <span className="text-xs text-zinc-500 block">Clients with past-due items</span>
+              </div>
+              <div className="bg-zinc-100 dark:bg-zinc-800 text-zinc-650 dark:text-zinc-400 rounded-xl p-3">
+                <Users size={20} />
+              </div>
+            </div>
+
+            {/* Active Clients With Due */}
+            <div className="bg-white dark:bg-zinc-900 rounded-2xl p-5 border border-zinc-200 dark:border-zinc-800 flex justify-between items-start shadow-sm hover:scale-[1.01] transition-transform">
+              <div className="space-y-1">
+                <span className="text-zinc-400 text-xs font-medium uppercase tracking-wider block">Active Clients With Due</span>
+                <span className="text-2xl font-bold tracking-tight text-indigo-500 dark:text-indigo-400 font-sans block">
+                  {activeClientsWithDueCount} Clients
+                </span>
+                <span className="text-xs text-zinc-500 block">Active status clients with balance &gt; 0</span>
+              </div>
+              <div className="bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 rounded-xl p-3">
+                <CreditCard size={20} />
               </div>
             </div>
           </div>
@@ -1161,15 +1324,15 @@ export default function ClientReceivables() {
                 <h2>Top Client Receivables</h2>
               </div>
 
-              {clients.filter(c => c.balance > 0).length === 0 ? (
+              {clients.filter(c => (clientBalancesMap[c.id] || 0) > 0.01).length === 0 ? (
                 <div className="py-8 text-center text-zinc-400 text-xs">
                   Zero unpaid outstanding balances! Outstanding accounts are 100% recovered.
                 </div>
               ) : (
                 <div className="space-y-3.5 max-h-[300px] overflow-y-auto pr-1">
                   {clients
-                    .filter(c => c.balance > 0)
-                    .sort((a, b) => b.balance - a.balance)
+                    .filter(c => (clientBalancesMap[c.id] || 0) > 0.01)
+                    .sort((a, b) => (clientBalancesMap[b.id] || 0) - (clientBalancesMap[a.id] || 0))
                     .slice(0, 5)
                     .map(client => (
                       <div
@@ -1192,7 +1355,7 @@ export default function ClientReceivables() {
                             <BookOpen size={10} />
                           </button>
                           <div className="text-xs font-mono font-black text-rose-500 mt-1">
-                            {renderMoney(client.balance)}
+                            {renderMoney(clientBalancesMap[client.id] || 0)}
                           </div>
                         </div>
                       </div>
@@ -1262,8 +1425,8 @@ export default function ClientReceivables() {
                         )}
                       </td>
                       <td className="py-3.5 px-4">
-                        <span className={`font-mono font-bold ${client.balance > 0 ? 'text-rose-500' : 'text-emerald-500'}`}>
-                          {renderMoney(client.balance)}
+                        <span className={`font-mono font-bold ${(clientBalancesMap[client.id] || 0) > 0.01 ? 'text-rose-500' : 'text-emerald-500'}`}>
+                          {renderMoney(clientBalancesMap[client.id] || 0)}
                         </span>
                       </td>
                       <td className="py-3.5 px-4 text-right space-x-2">
@@ -1392,21 +1555,31 @@ export default function ClientReceivables() {
                         </span>
                       </td>
                       <td className="py-3.5 px-4 text-right">
-                        <button
-                          onClick={() => {
-                            triggerDeleteConfirmation(
-                              'Confirm Deletion',
-                              'Are you sure you want to remove custom project details? This action cannot be undone.',
-                              `Project: ${proj.projectName}`,
-                              async () => {
-                                await deleteProject(proj.id);
-                              }
-                            );
-                          }}
-                          className="hover:text-rose-500 text-zinc-400 transition-colors p-2"
-                        >
-                          <Trash2 size={13} />
-                        </button>
+                        <div className="flex items-center justify-end gap-1">
+                          <button
+                            onClick={() => handleEditProjectClick(proj)}
+                            className="hover:text-amber-500 text-zinc-400 transition-colors p-2"
+                            title="Edit Project"
+                          >
+                            <Edit2 size={13} />
+                          </button>
+                          <button
+                            onClick={() => {
+                              triggerDeleteConfirmation(
+                                'Confirm Deletion',
+                                'Are you sure you want to remove custom project details? This action cannot be undone.',
+                                `Project: ${proj.projectName}`,
+                                async () => {
+                                  await deleteProject(proj.id);
+                                }
+                              );
+                            }}
+                            className="hover:text-rose-500 text-zinc-400 transition-colors p-2"
+                            title="Delete Project"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -2445,33 +2618,36 @@ export default function ClientReceivables() {
         )}
       </AnimatePresence>
 
-      {/* MODAL: ADD PROJECT */}
+      {/* MODAL: ADD/EDIT PROJECT */}
       <AnimatePresence>
         {showProjectModal && (
-          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
             <motion.div
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 p-6 w-full max-w-md shadow-2xl relative"
+              className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 p-6 w-full max-w-md shadow-2xl relative my-8"
             >
               <button
-                onClick={() => setShowProjectModal(false)}
+                onClick={() => {
+                  setShowProjectModal(false);
+                  setEditingProject(null);
+                }}
                 className="absolute right-4 top-4 p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg text-zinc-400"
               >
                 <X size={16} />
               </button>
               <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
-                <Briefcase size={18} /> New Software Project Contract
+                <Briefcase size={18} /> {editingProject ? 'Edit Software Project Contract' : 'New Software Project Contract'}
               </h2>
               <form onSubmit={handleCreateProject} className="space-y-4 text-xs">
                 <div className="space-y-1">
-                  <label className="text-zinc-500 font-medium">Select Contracting Client *</label>
+                  <label className="text-zinc-500 font-medium font-semibold text-[11px]">Select Contracting Client *</label>
                   <select
                     required
                     value={projectForm.clientId}
                     onChange={e => setProjectForm({ ...projectForm, clientId: e.target.value })}
-                    className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-3 py-2.5 outline-none"
+                    className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-3 py-2.5 outline-none font-semibold"
                   >
                     <option value="">-- Choose Client Profile --</option>
                     {clients.map(c => (
@@ -2479,69 +2655,142 @@ export default function ClientReceivables() {
                     ))}
                   </select>
                 </div>
-                <div className="space-y-1">
-                  <label className="text-zinc-500 font-medium">Project Name *</label>
-                  <input
-                    type="text"
-                    required
-                    value={projectForm.projectName}
-                    onChange={e => setProjectForm({ ...projectForm, projectName: e.target.value })}
-                    className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-3 py-2.5 outline-none text-zinc-900 dark:text-zinc-50"
-                    placeholder="e.g. E-Commerce Website Development"
-                  />
-                </div>
+                
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
-                    <label className="text-zinc-500 font-medium">Total Charge (Fee) *</label>
+                    <label className="text-zinc-500 font-medium font-semibold text-[11px]">Project Name *</label>
+                    <input
+                      type="text"
+                      required
+                      value={projectForm.projectName}
+                      onChange={e => setProjectForm({ ...projectForm, projectName: e.target.value })}
+                      className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-3 py-2.5 outline-none font-semibold text-zinc-900 dark:text-zinc-50"
+                      placeholder="e.g. E-Commerce Website"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-zinc-500 font-medium font-semibold text-[11px]">Project Type</label>
+                    <input
+                      type="text"
+                      value={projectForm.projectType}
+                      onChange={e => setProjectForm({ ...projectForm, projectType: e.target.value })}
+                      className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-3 py-2.5 outline-none text-zinc-900 dark:text-zinc-50"
+                      placeholder="e.g. Mobile App, SaaS"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-zinc-500 font-medium font-semibold text-[11px]">Description</label>
+                  <textarea
+                    value={projectForm.description}
+                    onChange={e => setProjectForm({ ...projectForm, description: e.target.value })}
+                    rows={2}
+                    className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-3 py-2 outline-none text-zinc-900 dark:text-zinc-50 resize-none"
+                    placeholder="Enter project description and scopes..."
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-zinc-500 font-medium font-semibold text-[11px]">Total Charge (Project Cost) *</label>
                     <input
                       type="number"
                       required
+                      min="0"
+                      step="0.01"
                       value={projectForm.totalAmount}
                       onChange={e => setProjectForm({ ...projectForm, totalAmount: Number(e.target.value) })}
-                      className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-3 py-2.5 outline-none font-mono"
+                      className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-3 py-2.5 outline-none font-mono font-semibold"
                       placeholder="e.g. 2500"
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-zinc-500 font-medium">Advance Deposit Paid</label>
+                    <label className="text-zinc-500 font-medium font-semibold text-[11px]">Advance Received (Deposit)</label>
                     <input
                       type="number"
+                      min="0"
+                      step="0.01"
                       value={projectForm.advanceAmount}
                       onChange={e => setProjectForm({ ...projectForm, advanceAmount: Number(e.target.value) })}
-                      className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-3 py-2.5 outline-none font-mono"
+                      className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-3 py-2.5 outline-none font-mono font-semibold"
                       placeholder="e.g. 500"
                     />
                   </div>
                 </div>
-                <div className="space-y-1">
-                  <label className="text-zinc-500 font-medium">Est. Delivery Date *</label>
-                  <input
-                    type="date"
-                    required
-                    value={projectForm.deliveryDate}
-                    onChange={e => setProjectForm({ ...projectForm, deliveryDate: e.target.value })}
-                    className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-3 py-2.5 outline-none font-mono"
-                  />
+
+                {/* Live Recalculated Due Amount Display */}
+                <div className="bg-zinc-50 dark:bg-zinc-800/40 p-3 rounded-xl border border-zinc-150 dark:border-zinc-800 flex justify-between items-center text-xs font-semibold">
+                  <span className="text-zinc-500">Calculated Due Amount</span>
+                  <span className="font-mono text-rose-500 font-bold">
+                    {renderMoney(Math.max(0, projectForm.totalAmount - projectForm.advanceAmount))}
+                  </span>
                 </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-zinc-500 font-medium font-semibold text-[11px]">Start Date</label>
+                    <input
+                      type="date"
+                      value={projectForm.startDate}
+                      onChange={e => setProjectForm({ ...projectForm, startDate: e.target.value })}
+                      className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-3 py-2.5 outline-none font-mono"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-zinc-500 font-medium font-semibold text-[11px]">Est. Delivery Date *</label>
+                    <input
+                      type="date"
+                      required
+                      value={projectForm.deliveryDate}
+                      onChange={e => setProjectForm({ ...projectForm, deliveryDate: e.target.value })}
+                      className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-3 py-2.5 outline-none font-mono"
+                    />
+                  </div>
+                </div>
+
                 <div className="space-y-1">
-                  <label className="text-zinc-500 font-medium">Development Progress State</label>
+                  <label className="text-zinc-500 font-medium font-semibold text-[11px]">Development Progress State</label>
                   <select
                     value={projectForm.status}
                     onChange={e => setProjectForm({ ...projectForm, status: e.target.value as Project['status'] })}
-                    className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-3 py-2.5 outline-none"
+                    className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-3 py-2.5 outline-none font-semibold text-zinc-900 dark:text-zinc-100"
                   >
+                    <option value="Pending">Pending</option>
                     <option value="In Progress">In Progress</option>
+                    <option value="Testing">Testing</option>
+                    <option value="Delivered">Delivered</option>
                     <option value="Completed">Completed</option>
-                    <option value="On Hold">On Hold</option>
                     <option value="Cancelled">Cancelled</option>
                     <option value="Not Started">Not Started</option>
+                    <option value="On Hold">On Hold</option>
                   </select>
                 </div>
+
+                <div className="space-y-1">
+                  <label className="text-zinc-500 font-medium font-semibold text-[11px]">Notes / Discussion Terms</label>
+                  <textarea
+                    value={projectForm.notes}
+                    onChange={e => setProjectForm({ ...projectForm, notes: e.target.value })}
+                    rows={2}
+                    className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-3 py-2 outline-none text-zinc-900 dark:text-zinc-50 resize-none font-sans"
+                    placeholder="Enter special pricing agreements or details..."
+                  />
+                </div>
+
                 <button
                   type="submit"
-                  className="w-full bg-zinc-950 dark:bg-zinc-50 dark:text-zinc-950 text-white font-bold py-2.5 rounded-xl tracking-wide"
+                  disabled={isSavingProject}
+                  className="w-full bg-zinc-950 hover:bg-zinc-900 dark:bg-zinc-50 dark:hover:bg-zinc-100 dark:text-zinc-950 text-white font-bold py-2.5 rounded-xl tracking-wide transition-colors flex items-center justify-center gap-1.5"
                 >
-                  Create & Post Project Fees
+                  {isSavingProject ? (
+                    <>
+                      <span className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin"></span>
+                      Saving...
+                    </>
+                  ) : (
+                    editingProject ? 'Save Project Changes' : 'Create & Post Project Fees'
+                  )}
                 </button>
               </form>
             </motion.div>
@@ -3025,7 +3274,7 @@ export default function ClientReceivables() {
                   >
                     <option value="">-- Choose Client --</option>
                     {clients.map(c => (
-                      <option key={c.id} value={c.id}>{c.name} ({renderMoney(c.balance || 0)} due)</option>
+                      <option key={c.id} value={c.id}>{c.name} ({renderMoney(clientBalancesMap[c.id] || 0)} due)</option>
                     ))}
                   </select>
                 </div>
@@ -3185,7 +3434,7 @@ export default function ClientReceivables() {
                 <div className="text-center">
                   <span className="text-[10px] text-zinc-400 uppercase font-medium">Receivables Balance</span>
                   <div className="text-sm font-bold font-mono text-rose-500 dark:text-rose-400 mt-1">
-                    {renderMoney(selectedClientDetail.balance)}
+                    {renderMoney(clientBalancesMap[selectedClientDetail.id] || 0)}
                   </div>
                 </div>
               </div>

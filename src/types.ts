@@ -139,8 +139,11 @@ export interface Project {
   advanceAmount: number;
   dueAmount: number;
   deliveryDate: string;
-  status: 'In Progress' | 'Completed' | 'On Hold' | 'Cancelled' | 'Not Started';
+  status: 'Pending' | 'In Progress' | 'Testing' | 'Delivered' | 'Completed' | 'Cancelled' | 'Not Started' | 'On Hold';
   notes?: string;
+  projectType?: string;
+  description?: string;
+  startDate?: string;
   created_at?: any;
   deleted_at?: any;
 }

@@ -906,9 +906,67 @@ export const editClientAndAdjustOpeningBalance = async (
 
 export const deleteClient = async (id: string) => {
   try {
-    await updateDoc(doc(db, 'clients', id), {
+    const batch = writeBatch(db);
+    batch.update(doc(db, 'clients', id), {
       deleted_at: serverTimestamp()
     });
+
+    // Soft-delete matched projects
+    const projQ = query(
+      collection(db, 'projects'),
+      where('clientId', '==', id),
+      where('deleted_at', '==', null)
+    );
+    const projSnap = await getDocs(projQ);
+    projSnap.docs.forEach(docSnap => {
+      batch.update(docSnap.ref, { deleted_at: serverTimestamp() });
+    });
+
+    // Soft-delete matched subscriptions
+    const subQ = query(
+      collection(db, 'subscriptions'),
+      where('clientId', '==', id),
+      where('deleted_at', '==', null)
+    );
+    const subSnap = await getDocs(subQ);
+    subSnap.docs.forEach(docSnap => {
+      batch.update(docSnap.ref, { deleted_at: serverTimestamp() });
+    });
+
+    // Soft-delete matched receivables
+    const recQ = query(
+      collection(db, 'receivables'),
+      where('clientId', '==', id),
+      where('deleted_at', '==', null)
+    );
+    const recSnap = await getDocs(recQ);
+    recSnap.docs.forEach(docSnap => {
+      batch.update(docSnap.ref, { deleted_at: serverTimestamp() });
+    });
+
+    // Soft-delete matched payments
+    const payQ = query(
+      collection(db, 'payments'),
+      where('clientId', '==', id),
+      where('deleted_at', '==', null)
+    );
+    const paySnap = await getDocs(payQ);
+    paySnap.docs.forEach(docSnap => {
+      batch.update(docSnap.ref, { deleted_at: serverTimestamp() });
+    });
+
+    // Soft-delete matched client ledgers
+    const ledgerQ = query(
+      collection(db, 'client_ledgers'),
+      where('clientId', '==', id),
+      where('deleted_at', '==', null)
+    );
+    const ledgerSnap = await getDocs(ledgerQ);
+    ledgerSnap.docs.forEach(docSnap => {
+      batch.update(docSnap.ref, { deleted_at: serverTimestamp() });
+    });
+
+    await batch.commit();
   } catch (error) {
     handleFirestoreError(error, 'DELETE', `clients/${id}`);
   }
@@ -1070,11 +1128,206 @@ export const updateProject = async (id: string, data: Partial<Project>) => {
   }
 };
 
+export const editProjectAndSyncFinancials = async (
+  projectId: string,
+  updatedData: Partial<Project>,
+  oldProject: Project
+) => {
+  try {
+    const batch = writeBatch(db);
+
+    // 1. Update the Project document itself
+    const projectRef = doc(db, 'projects', projectId);
+    batch.update(projectRef, {
+      ...updatedData,
+      updatedAt: serverTimestamp(),
+      updated_at: serverTimestamp()
+    });
+
+    const newClientId = updatedData.clientId || oldProject.clientId;
+    const newClientName = updatedData.clientName || oldProject.clientName;
+    const newProjectName = updatedData.projectName || oldProject.projectName;
+    const newTotalAmount = updatedData.totalAmount !== undefined ? Number(updatedData.totalAmount) : oldProject.totalAmount;
+    const oldTotalAmount = oldProject.totalAmount;
+    const newDueAmount = updatedData.dueAmount !== undefined ? Number(updatedData.dueAmount) : oldProject.dueAmount;
+    const newDeliveryDate = updatedData.deliveryDate || oldProject.deliveryDate;
+
+    // 2. Adjust Ledger Entry & Client Balances
+    const ledgerQuery = query(
+      collection(db, 'client_ledgers'),
+      where('userId', '==', oldProject.userId),
+      where('clientId', '==', oldProject.clientId),
+      where('type', '==', 'Project Charge'),
+      where('deleted_at', '==', null)
+    );
+    const ledgerSnap = await getDocs(ledgerQuery);
+    const oldDescription = `Project Initial Charge: ${oldProject.projectName}`;
+    const ledgerDoc = ledgerSnap.docs.find(d => {
+      const data = d.data();
+      return data.description === oldDescription || data.description?.includes(oldProject.projectName);
+    });
+
+    if (ledgerDoc) {
+      const ledgerRef = doc(db, 'client_ledgers', ledgerDoc.id);
+      
+      if (oldProject.clientId === newClientId) {
+        // Client did not change, project cost might have changed
+        const costDifference = newTotalAmount - oldTotalAmount;
+        
+        // Update ledger entry
+        batch.update(ledgerRef, {
+          debit: newTotalAmount,
+          description: `Project Initial Charge: ${newProjectName}`
+        });
+
+        // Update client balance
+        const clientRef = doc(db, 'clients', oldProject.clientId);
+        const clientSnap = await getDoc(clientRef);
+        if (clientSnap.exists()) {
+          const currentBalance = clientSnap.data().balance || 0;
+          batch.update(clientRef, { balance: currentBalance + costDifference });
+        }
+      } else {
+        // Client changed!
+        // A. Remove old cost from old client
+        const oldClientRef = doc(db, 'clients', oldProject.clientId);
+        const oldClientSnap = await getDoc(oldClientRef);
+        if (oldClientSnap.exists()) {
+          const oldBalance = oldClientSnap.data().balance || 0;
+          batch.update(oldClientRef, { balance: oldBalance - oldTotalAmount });
+        }
+
+        // B. Add new cost to new client
+        const newClientRef = doc(db, 'clients', newClientId);
+        const newClientSnap = await getDoc(newClientRef);
+        if (newClientSnap.exists()) {
+          const newBalance = newClientSnap.data().balance || 0;
+          batch.update(newClientRef, { balance: newBalance + newTotalAmount });
+        }
+
+        // C. Update ledger entry client details
+        batch.update(ledgerRef, {
+          clientId: newClientId,
+          clientName: newClientName,
+          debit: newTotalAmount,
+          description: `Project Initial Charge: ${newProjectName}`
+        });
+      }
+    }
+
+    // 3. Adjust Receivable Entry
+    const receivableQuery = query(
+      collection(db, 'receivables'),
+      where('userId', '==', oldProject.userId),
+      where('clientId', '==', oldProject.clientId),
+      where('deleted_at', '==', null)
+    );
+    const receivableSnap = await getDocs(receivableQuery);
+    const oldRecDescription = `Due payment for Project: ${oldProject.projectName}`;
+    const receivableDoc = receivableSnap.docs.find(d => {
+      const data = d.data();
+      return data.description === oldRecDescription || data.description?.includes(oldProject.projectName);
+    });
+
+    if (receivableDoc) {
+      const recRef = doc(db, 'receivables', receivableDoc.id);
+      
+      if (oldProject.clientId === newClientId) {
+        batch.update(recRef, {
+          amount: newDueAmount,
+          dueDate: newDeliveryDate,
+          description: `Due payment for Project: ${newProjectName}`,
+          status: newDueAmount <= 0 ? 'Paid' : 'Pending'
+        });
+      } else {
+        batch.update(recRef, {
+          clientId: newClientId,
+          clientName: newClientName,
+          amount: newDueAmount,
+          dueDate: newDeliveryDate,
+          description: `Due payment for Project: ${newProjectName}`,
+          status: newDueAmount <= 0 ? 'Paid' : 'Pending'
+        });
+      }
+    } else {
+      // If no receivable existed but there is a positive dueAmount, create a new one!
+      if (newDueAmount > 0) {
+        const newRecRef = doc(collection(db, 'receivables'));
+        batch.set(newRecRef, {
+          userId: oldProject.userId,
+          clientId: newClientId,
+          clientName: newClientName,
+          amount: newDueAmount,
+          dueDate: newDeliveryDate,
+          description: `Due payment for Project: ${newProjectName}`,
+          status: 'Pending',
+          amountPaid: 0,
+          created_at: serverTimestamp(),
+          deleted_at: null
+        });
+      }
+    }
+
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, 'UPDATE', `projects/${projectId}`);
+  }
+};
+
 export const deleteProject = async (id: string) => {
   try {
-    await updateDoc(doc(db, 'projects', id), {
-      deleted_at: serverTimestamp()
+    const projRef = doc(db, 'projects', id);
+    const projSnap = await getDoc(projRef);
+    if (!projSnap.exists()) return;
+    const projData = projSnap.data() as Project;
+
+    const batch = writeBatch(db);
+    batch.update(projRef, { deleted_at: serverTimestamp() });
+
+    // Find and soft-delete matching client ledger entries
+    const ledgerQ = query(
+      collection(db, 'client_ledgers'),
+      where('clientId', '==', projData.clientId),
+      where('deleted_at', '==', null)
+    );
+    const ledgerSnap = await getDocs(ledgerQ);
+    let totalDebitReverted = 0;
+    ledgerSnap.docs.forEach(docSnap => {
+      const data = docSnap.data();
+      if (
+        data.type === 'Project Charge' && 
+        (data.description || '').includes(projData.projectName)
+      ) {
+        batch.update(docSnap.ref, { deleted_at: serverTimestamp() });
+        totalDebitReverted += (data.debit || 0);
+      }
     });
+
+    // Find and soft-delete matching receivables
+    const recQ = query(
+      collection(db, 'receivables'),
+      where('clientId', '==', projData.clientId),
+      where('deleted_at', '==', null)
+    );
+    const recSnap = await getDocs(recQ);
+    recSnap.docs.forEach(docSnap => {
+      const data = docSnap.data();
+      if ((data.description || '').includes(projData.projectName)) {
+        batch.update(docSnap.ref, { deleted_at: serverTimestamp() });
+      }
+    });
+
+    // Revert client outstanding balance
+    if (totalDebitReverted > 0) {
+      const clientRef = doc(db, 'clients', projData.clientId);
+      const clientSnap = await getDoc(clientRef);
+      if (clientSnap.exists()) {
+        const clientBal = clientSnap.data().balance || 0;
+        batch.update(clientRef, { balance: Math.max(0, clientBal - totalDebitReverted) });
+      }
+    }
+
+    await batch.commit();
   } catch (error) {
     handleFirestoreError(error, 'DELETE', `projects/${id}`);
   }
@@ -1151,9 +1404,58 @@ export const updateSubscription = async (id: string, data: Partial<Subscription>
 
 export const deleteSubscription = async (id: string) => {
   try {
-    await updateDoc(doc(db, 'subscriptions', id), {
-      deleted_at: serverTimestamp()
+    const subRef = doc(db, 'subscriptions', id);
+    const subSnap = await getDoc(subRef);
+    if (!subSnap.exists()) return;
+    const subData = subSnap.data() as Subscription;
+
+    const batch = writeBatch(db);
+    batch.update(subRef, { deleted_at: serverTimestamp() });
+
+    // Find and soft-delete matching client ledger entries
+    const ledgerQ = query(
+      collection(db, 'client_ledgers'),
+      where('clientId', '==', subData.clientId),
+      where('deleted_at', '==', null)
+    );
+    const ledgerSnap = await getDocs(ledgerQ);
+    let totalDebitReverted = 0;
+    ledgerSnap.docs.forEach(docSnap => {
+      const data = docSnap.data();
+      if (
+        data.type === 'Subscription Charge' && 
+        (data.description || '').includes(subData.productName)
+      ) {
+        batch.update(docSnap.ref, { deleted_at: serverTimestamp() });
+        totalDebitReverted += (data.debit || 0);
+      }
     });
+
+    // Find and soft-delete matching receivables
+    const recQ = query(
+      collection(db, 'receivables'),
+      where('clientId', '==', subData.clientId),
+      where('deleted_at', '==', null)
+    );
+    const recSnap = await getDocs(recQ);
+    recSnap.docs.forEach(docSnap => {
+      const data = docSnap.data();
+      if ((data.description || '').includes(subData.productName)) {
+        batch.update(docSnap.ref, { deleted_at: serverTimestamp() });
+      }
+    });
+
+    // Revert client outstanding balance
+    if (totalDebitReverted > 0) {
+      const clientRef = doc(db, 'clients', subData.clientId);
+      const clientSnap = await getDoc(clientRef);
+      if (clientSnap.exists()) {
+        const clientBal = clientSnap.data().balance || 0;
+        batch.update(clientRef, { balance: Math.max(0, clientBal - totalDebitReverted) });
+      }
+    }
+
+    await batch.commit();
   } catch (error) {
     handleFirestoreError(error, 'DELETE', `subscriptions/${id}`);
   }
@@ -1250,9 +1552,44 @@ export const updateReceivable = async (id: string, data: Partial<Receivable>) =>
 
 export const deleteReceivable = async (id: string) => {
   try {
-    await updateDoc(doc(db, 'receivables', id), {
-      deleted_at: serverTimestamp()
+    const recRef = doc(db, 'receivables', id);
+    const recSnap = await getDoc(recRef);
+    if (!recSnap.exists()) return;
+    const recData = recSnap.data() as Receivable;
+
+    const batch = writeBatch(db);
+    batch.update(recRef, { deleted_at: serverTimestamp() });
+
+    // Find and soft-delete matching client ledger entries
+    const ledgerQ = query(
+      collection(db, 'client_ledgers'),
+      where('clientId', '==', recData.clientId),
+      where('deleted_at', '==', null)
+    );
+    const ledgerSnap = await getDocs(ledgerQ);
+    let totalDebitReverted = 0;
+    ledgerSnap.docs.forEach(docSnap => {
+      const data = docSnap.data();
+      if (
+        (data.description || '').includes(recData.invoiceNumber || '') || 
+        (recData.description && (data.description || '').includes(recData.description))
+      ) {
+        batch.update(docSnap.ref, { deleted_at: serverTimestamp() });
+        totalDebitReverted += (data.debit || 0);
+      }
     });
+
+    // Revert client outstanding balance
+    if (totalDebitReverted > 0) {
+      const clientRef = doc(db, 'clients', recData.clientId);
+      const clientSnap = await getDoc(clientRef);
+      if (clientSnap.exists()) {
+        const clientBal = clientSnap.data().balance || 0;
+        batch.update(clientRef, { balance: Math.max(0, clientBal - totalDebitReverted) });
+      }
+    }
+
+    await batch.commit();
   } catch (error) {
     handleFirestoreError(error, 'DELETE', `receivables/${id}`);
   }
@@ -1330,22 +1667,27 @@ export const deletePayment = async (id: string) => {
 
     const payData = paySnap.data() as PaymentCollection;
 
-    // Soft delete the payment document
-    await updateDoc(payRef, { deleted_at: serverTimestamp() });
+    const batch = writeBatch(db);
+    batch.update(payRef, { deleted_at: serverTimestamp() });
 
-    // Reverse payment entry in ledgers – we look for ledger entry for payment matches and soft delete it
-    // Or we record an Adjustment ledger entry. The cleaner way is creating a new Adjustment entry or deleting the matching ledger entry.
-    // Let's create an Adjustment entry to reverse the credit or search and delete the ledger record.
-    // To keep it simple and robust, let's post an 'Adjustment' ledger entry to re-debit the balance due to voided payment!
-    await addLedgerEntry({
-      userId: payData.userId,
-      clientId: payData.clientId,
-      date: new Date().toISOString().split('T')[0],
-      type: 'Adjustment',
-      description: `Reversal of Payment ${id} (Voided)`,
-      debit: payData.amount,
-      credit: 0,
-      runningBalance: 0
+    // Soft-delete original 'Payment Received' ledger entry so that credit decreases instantly
+    const ledgerQ = query(
+      collection(db, 'client_ledgers'),
+      where('clientId', '==', payData.clientId),
+      where('deleted_at', '==', null)
+    );
+    const ledgerSnap = await getDocs(ledgerQ);
+    let totalCreditReverted = 0;
+    ledgerSnap.docs.forEach(docSnap => {
+      const data = docSnap.data();
+      if (
+        data.type === 'Payment Received' && 
+        data.credit === payData.amount && 
+        ((data.description || '').includes(payData.paymentMethod) || (payData.notes && (data.description || '').includes(payData.notes)))
+      ) {
+        batch.update(docSnap.ref, { deleted_at: serverTimestamp() });
+        totalCreditReverted += (data.credit || 0);
+      }
     });
 
     // If there was a receivableId linked, reverse the paid amount
@@ -1361,12 +1703,22 @@ export const deletePayment = async (id: string) => {
         } else if (newPaid > 0) {
           newStatus = 'Partial';
         }
-        await updateDoc(recRef, {
+        batch.update(recRef, {
           amountPaid: newPaid,
           status: newStatus
         });
       }
     }
+
+    // Adjust client balance (if payment is deleted, the client outstanding balance increases back up)
+    const clientRef = doc(db, 'clients', payData.clientId);
+    const clientSnap = await getDoc(clientRef);
+    if (clientSnap.exists()) {
+      const clientBal = clientSnap.data().balance || 0;
+      batch.update(clientRef, { balance: clientBal + payData.amount });
+    }
+
+    await batch.commit();
 
   } catch (error) {
     handleFirestoreError(error, 'DELETE', `payments/${id}`);
