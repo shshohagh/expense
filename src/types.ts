@@ -107,8 +107,11 @@ export interface Client {
   address?: string;
   notes?: string;
   balance: number; // outstanding running balance
+  status?: 'Active' | 'Inactive';
   created_at?: any;
   deleted_at?: any;
+  updatedAt?: any;
+  updated_at?: any;
 }
 
 export interface ClientLedger {
@@ -179,6 +182,7 @@ export interface Subscription {
   productCategory?: string;
   branchCount?: number;
   yearlyFee?: number;
+  expiryDate?: string;
 }
 
 export interface Receivable {

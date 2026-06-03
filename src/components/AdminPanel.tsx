@@ -3,6 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { User } from '../types';
 import { Shield, User as UserIcon, Plus, Edit2, X, Eye, EyeOff, Lock, Check, AlertCircle, FileText, FileSpreadsheet, Trash2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import DeleteConfirmationModal from './DeleteConfirmationModal';
 import * as XLSX from 'xlsx';
 import { 
   subscribeToUsers, 
@@ -46,15 +47,16 @@ export default function AdminPanel() {
     isOpen: boolean;
     title: string;
     message: string;
-    onConfirm: () => void;
-    type: 'danger' | 'info';
+    itemName?: string;
+    onConfirm: () => void | Promise<void>;
   }>({
     isOpen: false,
     title: '',
     message: '',
+    itemName: '',
     onConfirm: () => {},
-    type: 'info'
   });
+  const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
   const [notification, setNotification] = useState<{
     message: string;
     type: 'success' | 'error' | 'info';
@@ -141,16 +143,19 @@ export default function AdminPanel() {
       isOpen: true,
       title: 'Delete Role',
       message,
-      type: 'danger',
+      itemName: `Role: ${role}`,
       onConfirm: async () => {
+        setIsConfirmingDelete(true);
         try {
           await deleteRole(role);
           setNotification({ message: 'Role deleted successfully', type: 'success' });
         } catch (error) {
           console.error(error);
           setNotification({ message: 'Failed to delete role', type: 'error' });
+        } finally {
+          setIsConfirmingDelete(false);
+          setConfirmModal(prev => ({ ...prev, isOpen: false }));
         }
-        setConfirmModal(prev => ({ ...prev, isOpen: false }));
       }
     });
   };
@@ -195,16 +200,19 @@ export default function AdminPanel() {
       isOpen: true,
       title: 'Delete User',
       message: `Are you sure you want to delete ${user.name}? This action cannot be undone.`,
-      type: 'danger',
+      itemName: `User: ${user.name} (${user.email})`,
       onConfirm: async () => {
+        setIsConfirmingDelete(true);
         try {
           await adminDeleteUser(user.id.toString());
           setNotification({ message: 'User deleted successfully', type: 'success' });
         } catch (error) {
           console.error(error);
           setNotification({ message: 'Failed to delete user', type: 'error' });
+        } finally {
+          setIsConfirmingDelete(false);
+          setConfirmModal(prev => ({ ...prev, isOpen: false }));
         }
-        setConfirmModal(prev => ({ ...prev, isOpen: false }));
       }
     });
   };
@@ -673,42 +681,15 @@ export default function AdminPanel() {
           </motion.div>
         )}
 
-        {confirmModal.isOpen && (
-          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="w-full max-w-sm bg-white dark:bg-zinc-900 rounded-3xl shadow-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden"
-            >
-              <div className="p-6 text-center">
-                <div className={`w-12 h-12 rounded-full mx-auto mb-4 flex items-center justify-center ${
-                  confirmModal.type === 'danger' ? 'bg-rose-100 text-rose-600' : 'bg-zinc-100 text-zinc-600'
-                }`}>
-                  <AlertCircle size={24} />
-                </div>
-                <h3 className="text-lg font-bold mb-2">{confirmModal.title}</h3>
-                <p className="text-sm text-muted-foreground mb-6">{confirmModal.message}</p>
-                <div className="flex gap-3">
-                  <button
-                    onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
-                    className="flex-1 px-4 py-2 bg-zinc-100 dark:bg-zinc-800 rounded-xl font-medium hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={confirmModal.onConfirm}
-                    className={`flex-1 px-4 py-2 rounded-xl font-medium text-white transition-opacity hover:opacity-90 ${
-                      confirmModal.type === 'danger' ? 'bg-rose-600' : 'bg-zinc-900 dark:bg-zinc-100 dark:text-zinc-900'
-                    }`}
-                  >
-                    Confirm
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </div>
-        )}
+        <DeleteConfirmationModal
+          isOpen={confirmModal.isOpen}
+          title={confirmModal.title}
+          message={confirmModal.message}
+          itemName={confirmModal.itemName}
+          onConfirm={confirmModal.onConfirm}
+          onCancel={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+          isLoading={isConfirmingDelete}
+        />
 
         {isModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">

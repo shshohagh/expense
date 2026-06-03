@@ -34,6 +34,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency } from '../utils/i18n';
+import DeleteConfirmationModal from './DeleteConfirmationModal';
 
 export default function Quotations() {
   const { user } = useAuth();
@@ -43,6 +44,9 @@ export default function Quotations() {
 
   // State arrays from Firestore
   const [clients, setClients] = useState<Client[]>([]);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [quotationToDelete, setQuotationToDelete] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [quotations, setQuotations] = useState<Quotation[]>([]);
   const [allQuotationItems, setAllQuotationItems] = useState<QuotationItem[]>([]);
 
@@ -275,9 +279,22 @@ export default function Quotations() {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (window.confirm('Are you sure you want to delete this quotation and its matching items?')) {
-      await deleteQuotation(id);
+  const handleDelete = (id: string) => {
+    setQuotationToDelete(id);
+    setDeleteModalOpen(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!quotationToDelete) return;
+    setIsDeleting(true);
+    try {
+      await deleteQuotation(quotationToDelete);
+      setDeleteModalOpen(false);
+      setQuotationToDelete(null);
+    } catch (e) {
+      console.error('Error deleting quotation:', e);
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -1287,6 +1304,22 @@ export default function Quotations() {
           </div>
         )}
       </AnimatePresence>
+
+      <DeleteConfirmationModal
+        isOpen={deleteModalOpen}
+        title="Confirm Deletion"
+        message="Are you sure you want to delete this quotation and its matching items? This action cannot be undone."
+        itemName={(() => {
+          const q = quotations.find(qt => qt.id === quotationToDelete);
+          return q ? `Quotation #${q.quotationNumber} for ${q.clientName}` : undefined;
+        })()}
+        onConfirm={handleDeleteConfirm}
+        onCancel={() => {
+          setDeleteModalOpen(false);
+          setQuotationToDelete(null);
+        }}
+        isLoading={isDeleting}
+      />
     </div>
   );
 }

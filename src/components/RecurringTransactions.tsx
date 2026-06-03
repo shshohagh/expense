@@ -4,6 +4,7 @@ import { formatCurrency } from '../utils/i18n';
 import { Plus, Edit2, Trash2, Copy, X, RefreshCw, Calendar, Tag, ArrowUpCircle, ArrowDownCircle, Download, FileSpreadsheet, FileText, Search, Filter } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
+import DeleteConfirmationModal from './DeleteConfirmationModal';
 import { 
   subscribeToRecurringTransactions, 
   subscribeToCategories,
@@ -39,6 +40,7 @@ export default function RecurringTransactions() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [itemToDelete, setItemToDelete] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [editingRT, setEditingRT] = useState<RecurringTransaction | null>(null);
   
   // Filters
@@ -109,12 +111,15 @@ export default function RecurringTransactions() {
 
   const confirmDelete = async () => {
     if (!itemToDelete) return;
+    setIsDeleting(true);
     try {
       await deleteRecurringTransaction(itemToDelete);
       setShowDeleteConfirm(false);
       setItemToDelete(null);
     } catch (error) {
       console.error(error);
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -372,38 +377,21 @@ export default function RecurringTransactions() {
         )}
       </div>
 
-      <AnimatePresence>
-        {showDeleteConfirm && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="w-full max-w-sm bg-white dark:bg-zinc-900 rounded-2xl shadow-xl border border-zinc-200 dark:border-zinc-800 p-6 text-center"
-            >
-              <div className="w-12 h-12 bg-rose-100 dark:bg-rose-900/30 text-rose-600 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Trash2 size={24} />
-              </div>
-              <h3 className="text-lg font-bold mb-2">Delete Recurring</h3>
-              <p className="text-muted-foreground mb-6">Are you sure you want to delete this recurring transaction? This will stop future automated entries.</p>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setShowDeleteConfirm(false)}
-                  className="flex-1 px-4 py-2 text-sm font-medium bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={confirmDelete}
-                  className="flex-1 px-4 py-2 text-sm font-medium bg-rose-600 text-white rounded-xl hover:bg-rose-700"
-                >
-                  Delete
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      <DeleteConfirmationModal
+        isOpen={showDeleteConfirm}
+        title="Confirm Deletion"
+        message="Are you sure you want to delete this recurring transaction? This action cannot be undone."
+        itemName={(() => {
+          const rtObj = recurring.find(r => r.id === itemToDelete);
+          return rtObj ? `Recurring transaction: ${rtObj.description || 'No description'} (${formatCurrency(rtObj.amount)})` : undefined;
+        })()}
+        onConfirm={confirmDelete}
+        onCancel={() => {
+          setShowDeleteConfirm(false);
+          setItemToDelete(null);
+        }}
+        isLoading={isDeleting}
+      />
 
       <AnimatePresence>
         {isModalOpen && (

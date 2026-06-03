@@ -4,38 +4,55 @@ import { t } from '../utils/i18n';
 import { Settings as SettingsIcon, Bell, Shield, Globe, Palette, Database, Trash2, Loader2 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { loadDemoData, deleteDemoData } from '../services/firestoreService';
+import DeleteConfirmationModal from './DeleteConfirmationModal';
 
 export default function Settings() {
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [successMessage, setSuccessMessage] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
   const lang = user?.language || 'en';
 
   const handleLoadDemo = async () => {
     if (!user?.id) return;
     setLoading(true);
+    setSuccessMessage('');
+    setErrorMessage('');
     try {
       await loadDemoData(user.id.toString());
-      alert('Demo data loaded successfully!');
+      setSuccessMessage('Demo data loaded successfully!');
+      setTimeout(() => setSuccessMessage(''), 4000);
     } catch (error) {
       console.error(error);
-      alert('Failed to load demo data.');
+      setErrorMessage('Failed to load demo data.');
+      setTimeout(() => setErrorMessage(''), 4000);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleDeleteDemo = async () => {
+  const handleDeleteDemo = () => {
+    setDeleteModalOpen(true);
+  };
+
+  const confirmDeleteDemo = async () => {
     if (!user?.id) return;
-    if (!confirm('Are you sure you want to delete all demo data? This action cannot be undone.')) return;
-    setLoading(true);
+    setIsDeleting(true);
+    setSuccessMessage('');
+    setErrorMessage('');
     try {
       await deleteDemoData(user.id.toString());
-      alert('Demo data deleted successfully!');
+      setSuccessMessage('Demo data deleted successfully!');
+      setTimeout(() => setSuccessMessage(''), 4000);
     } catch (error) {
       console.error(error);
-      alert('Failed to delete demo data.');
+      setErrorMessage('Failed to delete demo data.');
+      setTimeout(() => setErrorMessage(''), 4000);
     } finally {
-      setLoading(false);
+      setIsDeleting(false);
+      setDeleteModalOpen(false);
     }
   };
 
@@ -79,6 +96,17 @@ export default function Settings() {
       <header>
         <h1 className="text-3xl font-bold tracking-tight">Settings</h1>
         <p className="text-muted-foreground">Manage your application preferences and account security.</p>
+        
+        {successMessage && (
+          <div className="mt-4 p-3 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-800 dark:text-emerald-400 rounded-xl text-center font-semibold border border-emerald-200 dark:border-emerald-800 animate-fadeIn">
+            {successMessage}
+          </div>
+        )}
+        {errorMessage && (
+          <div className="mt-4 p-3 bg-rose-50 dark:bg-rose-950/20 text-rose-800 dark:text-rose-400 rounded-xl text-center font-semibold border border-rose-200 dark:border-rose-800 animate-fadeIn">
+            {errorMessage}
+          </div>
+        )}
       </header>
 
       <div className="grid gap-6">
@@ -155,6 +183,16 @@ export default function Settings() {
           </div>
         </motion.section>
       </div>
+
+      <DeleteConfirmationModal
+        isOpen={deleteModalOpen}
+        title="Confirm Deletion"
+        message="Are you sure you want to delete all demo data? This action cannot be undone."
+        itemName="All Demo Data"
+        onConfirm={confirmDeleteDemo}
+        onCancel={() => setDeleteModalOpen(false)}
+        isLoading={isDeleting}
+      />
     </div>
   );
 }

@@ -829,6 +829,81 @@ export const updateClient = async (id: string, data: Partial<Client>) => {
   }
 };
 
+export const editClientAndAdjustOpeningBalance = async (
+  clientId: string,
+  userId: string,
+  payload: {
+    name: string;
+    companyName: string;
+    mobileNumber: string;
+    whatsAppNumber: string;
+    email: string;
+    address: string;
+    notes: string;
+    status: 'Active' | 'Inactive';
+    initialDebt: number;
+  },
+  oldOpeningEntry: ClientLedger | undefined,
+  currentClientBalance: number
+) => {
+  try {
+    // Calculate the difference in Initial Outstanding Debt Balance
+    const oldInitialDebt = oldOpeningEntry ? (oldOpeningEntry.debit || 0) : 0;
+    const debtDifference = payload.initialDebt - oldInitialDebt;
+
+    // Calculate the updated overall balance for the client document
+    const updatedClientBalance = currentClientBalance + debtDifference;
+
+    const batch = writeBatch(db);
+
+    // Update the client document
+    const clientRef = doc(db, 'clients', clientId);
+    batch.update(clientRef, {
+      name: payload.name,
+      companyName: payload.companyName || '',
+      mobileNumber: payload.mobileNumber || '',
+      whatsAppNumber: payload.whatsAppNumber || '',
+      email: payload.email || '',
+      address: payload.address || '',
+      notes: payload.notes || '',
+      status: payload.status || 'Active',
+      balance: updatedClientBalance,
+      updatedAt: serverTimestamp(),
+      updated_at: serverTimestamp()
+    });
+
+    // Handle the 'Opening Balance' ledger entry safely
+    if (oldOpeningEntry) {
+      const ledgerRef = doc(db, 'client_ledgers', oldOpeningEntry.id);
+      batch.update(ledgerRef, {
+        debit: payload.initialDebt,
+        runningBalance: payload.initialDebt,
+        updatedAt: serverTimestamp(),
+        updated_at: serverTimestamp()
+      });
+    } else if (payload.initialDebt > 0) {
+      const ledgerRef = doc(collection(db, 'client_ledgers'));
+      batch.set(ledgerRef, {
+        userId,
+        clientId,
+        clientName: payload.name,
+        date: new Date().toISOString().split('T')[0],
+        type: 'Opening Balance',
+        description: 'Opening Outstanding Balance Contribution',
+        debit: payload.initialDebt,
+        credit: 0,
+        runningBalance: payload.initialDebt,
+        created_at: serverTimestamp(),
+        deleted_at: null
+      });
+    }
+
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, 'UPDATE', `clients/${clientId}`);
+  }
+};
+
 export const deleteClient = async (id: string) => {
   try {
     await updateDoc(doc(db, 'clients', id), {

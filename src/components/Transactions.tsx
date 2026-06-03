@@ -6,6 +6,7 @@ import { formatCurrency } from '../utils/i18n';
 import { Plus, Trash2, Edit2, Download, Filter, Copy, Upload } from 'lucide-react';
 import BankStatementImporter from './BankStatementImporter';
 import { motion, AnimatePresence } from 'motion/react';
+import DeleteConfirmationModal from './DeleteConfirmationModal';
 import { 
   subscribeToTransactions, 
   subscribeToCategories, 
@@ -24,9 +25,11 @@ export default function Transactions() {
   const [showModal, setShowModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [itemToDelete, setItemToDelete] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [showImporter, setShowImporter] = useState(false);
   
   const [dateFilter, setDateFilter] = useState<'today' | 'yesterday' | 'last7' | 'last30' | 'thisWeek' | 'thisMonth' | 'thisYear' | 'lifetime' | 'custom'>('lifetime');
@@ -119,23 +122,29 @@ export default function Transactions() {
 
   const confirmDelete = async () => {
     if (!itemToDelete) return;
+    setIsDeleting(true);
     try {
       await deleteTransaction(itemToDelete);
       setShowDeleteConfirm(false);
       setItemToDelete(null);
     } catch (error) {
       console.error(error);
+    } finally {
+      setIsDeleting(false);
     }
   };
 
   const handleBulkDelete = async () => {
     try {
+      setIsBulkDeleting(true);
       const currentIds = [...selectedIds];
       setSelectedIds([]);
       setShowBulkDeleteConfirm(false);
       await bulkDeleteTransactions(currentIds);
     } catch (error) {
       console.error(error);
+    } finally {
+      setIsBulkDeleting(false);
     }
   };
 
@@ -510,71 +519,33 @@ export default function Transactions() {
 
       {showImporter && <BankStatementImporter onClose={() => setShowImporter(false)} onImport={handleImport} />}
       
-      <AnimatePresence>
-        {showDeleteConfirm && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="w-full max-w-sm bg-white dark:bg-zinc-900 rounded-2xl shadow-xl border border-zinc-200 dark:border-zinc-800 p-6 text-center"
-            >
-              <div className="w-12 h-12 bg-rose-100 dark:bg-rose-900/30 text-rose-600 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Trash2 size={24} />
-              </div>
-              <h3 className="text-lg font-bold mb-2">Delete Transaction</h3>
-              <p className="text-muted-foreground mb-6">Are you sure you want to delete this transaction? This action cannot be undone.</p>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setShowDeleteConfirm(false)}
-                  className="flex-1 px-4 py-2 text-sm font-medium bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={confirmDelete}
-                  className="flex-1 px-4 py-2 text-sm font-medium bg-rose-600 text-white rounded-xl hover:bg-rose-700"
-                >
-                  Delete
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      <DeleteConfirmationModal
+        isOpen={showDeleteConfirm}
+        title="Confirm Deletion"
+        message="Are you sure you want to delete this transaction? This action cannot be undone."
+        itemName={(() => {
+          const t = transactions.find(tx => tx.id === itemToDelete);
+          return t ? `${t.type === 'INCOME' ? 'Income' : 'Expense'}: ${t.description || 'No Description'} (${formatCurrency(t.amount)})` : undefined;
+        })()}
+        onConfirm={confirmDelete}
+        onCancel={() => {
+          setShowDeleteConfirm(false);
+          setItemToDelete(null);
+        }}
+        isLoading={isDeleting}
+      />
 
-      <AnimatePresence>
-        {showBulkDeleteConfirm && (
-          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="w-full max-w-sm bg-white dark:bg-zinc-900 rounded-2xl shadow-xl border border-zinc-200 dark:border-zinc-800 p-6 text-center"
-            >
-              <div className="w-12 h-12 bg-rose-100 dark:bg-rose-900/30 text-rose-600 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Trash2 size={24} />
-              </div>
-              <h3 className="text-lg font-bold mb-2">Bulk Delete Transactions</h3>
-              <p className="text-muted-foreground mb-6">Are you sure you want to delete {selectedIds.length} transactions? This action cannot be undone.</p>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setShowBulkDeleteConfirm(false)}
-                  className="flex-1 px-4 py-2 text-sm font-medium bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleBulkDelete}
-                  className="flex-1 px-4 py-2 text-sm font-medium bg-rose-600 text-white rounded-xl hover:bg-rose-700"
-                >
-                  Delete Selected
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      <DeleteConfirmationModal
+        isOpen={showBulkDeleteConfirm}
+        title="Confirm Bulk Deletion"
+        message={`Are you sure you want to delete the ${selectedIds.length} selected transactions? This action cannot be undone.`}
+        itemName={`${selectedIds.length} Transactions selected`}
+        onConfirm={handleBulkDelete}
+        onCancel={() => {
+          setShowBulkDeleteConfirm(false);
+        }}
+        isLoading={isBulkDeleting}
+      />
 
       <AnimatePresence>
         {showModal && (

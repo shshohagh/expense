@@ -25,6 +25,7 @@ import {
   FileDown
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import DeleteConfirmationModal from './DeleteConfirmationModal';
 import { 
   addLoan, 
   updateLoan, 
@@ -54,6 +55,7 @@ export default function Loans() {
   const [showLoanModal, setShowLoanModal] = useState(false);
   const [showRepaymentModal, setShowRepaymentModal] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<{ type: 'loan' | 'repayment', id: string } | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   
   // Editing state
   const [editingLoan, setEditingLoan] = useState<Loan | null>(null);
@@ -267,6 +269,7 @@ export default function Loans() {
   const executeDelete = async () => {
     if (!showDeleteConfirm) return;
     const { type, id } = showDeleteConfirm;
+    setIsDeleting(true);
 
     try {
       if (type === 'loan') {
@@ -295,6 +298,8 @@ export default function Loans() {
       setShowDeleteConfirm(null);
     } catch (error) {
       console.error(error);
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -1076,47 +1081,25 @@ export default function Loans() {
       </AnimatePresence>
 
       {/* --- Simple Absolute Delete Confirmation Dialog --- */}
-      <AnimatePresence>
-        {showDeleteConfirm && (
-          <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4">
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setShowDeleteConfirm(null)}
-              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-            />
-            
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="relative w-full max-w-sm bg-white dark:bg-zinc-900 border border-zinc-250 dark:border-zinc-800 p-6 rounded-3xl shadow-2xl text-center space-y-4"
-            >
-              <h3 className="font-bold text-lg text-zinc-900 dark:text-zinc-150">Confirm Deletion</h3>
-              <p className="text-sm text-zinc-500">
-                Are you absolutely sure you want to delete this {showDeleteConfirm.type}? This action cannot be undone.
-              </p>
-              <div className="flex gap-3 justify-center pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowDeleteConfirm(null)}
-                  className="px-4 py-2 border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 rounded-xl text-sm"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={executeDelete}
-                  className="px-4 py-2 bg-rose-600 text-white rounded-xl text-sm font-semibold hover:bg-rose-700"
-                >
-                  Confirm Delete
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+      <DeleteConfirmationModal
+        isOpen={showDeleteConfirm !== null}
+        title="Confirm Deletion"
+        message={`Are you sure you want to delete this ${showDeleteConfirm?.type || 'item'}? This action cannot be undone.`}
+        itemName={(() => {
+          if (!showDeleteConfirm) return undefined;
+          const { type, id } = showDeleteConfirm;
+          if (type === 'loan') {
+            const l = loans.find(loanItem => loanItem.id === id);
+            return l ? `Loan for ${l.borrowerName} (${formatCurrency(l.amount)})` : undefined;
+          } else {
+            const r = repayments.find(repayItem => repayItem.id === id);
+            return r ? `Repayment of ${formatCurrency(r.repaymentAmount)}` : undefined;
+          }
+        })()}
+        onConfirm={executeDelete}
+        onCancel={() => setShowDeleteConfirm(null)}
+        isLoading={isDeleting}
+      />
     </div>
   );
 }

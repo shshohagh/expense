@@ -4,6 +4,7 @@ import { Plus, Edit2, Trash2, X, Users, Search, Filter } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { subscribeToBorrowers, addBorrower, updateBorrower, deleteBorrower, logActivity } from '../services/firestoreService';
 import { Borrower } from '../types';
+import DeleteConfirmationModal from './DeleteConfirmationModal';
 
 export default function BorrowerManagement() {
   const { user } = useAuth();
@@ -22,6 +23,11 @@ export default function BorrowerManagement() {
     status: 'Active'
   });
   const [searchTerm, setSearchTerm] = useState('');
+
+  // Delete modal state
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [borrowerToDelete, setBorrowerToDelete] = useState<Borrower | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -76,6 +82,26 @@ export default function BorrowerManagement() {
       status: borrower.status
     });
     setIsModalOpen(true);
+  };
+
+  const handleDeleteClick = (borrower: Borrower) => {
+    setBorrowerToDelete(borrower);
+    setDeleteModalOpen(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!borrowerToDelete || !user?.id) return;
+    setIsDeleting(true);
+    try {
+      await deleteBorrower(borrowerToDelete.id);
+      await logActivity(user.id.toString(), user.name, user.email, 'Delete Borrower', `Deleted borrower ${borrowerToDelete.fullName}`);
+      setDeleteModalOpen(false);
+      setBorrowerToDelete(null);
+    } catch (err) {
+      console.error('Error deleting borrower:', err);
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   const filteredBorrowers = borrowers.filter(b => 
@@ -133,7 +159,8 @@ export default function BorrowerManagement() {
                   </span>
                 </td>
                 <td className="p-4 text-right">
-                  <button onClick={() => editBorrower(b)} className="p-2 hover:bg-zinc-100 rounded text-blue-600"><Edit2 size={16} /></button>
+                  <button onClick={() => editBorrower(b)} className="p-2 hover:bg-zinc-100 rounded text-blue-600" title="Edit Borrower"><Edit2 size={16} /></button>
+                  <button onClick={() => handleDeleteClick(b)} className="p-2 hover:bg-zinc-100 rounded text-red-600 ml-1" title="Delete Borrower"><Trash2 size={16} /></button>
                 </td>
               </tr>
             ))}
@@ -172,6 +199,16 @@ export default function BorrowerManagement() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      <DeleteConfirmationModal
+        isOpen={deleteModalOpen}
+        title="Confirm Deletion"
+        message="Are you sure you want to delete this borrower? This action cannot be undone."
+        itemName={borrowerToDelete ? `Borrower: ${borrowerToDelete.fullName}` : undefined}
+        onConfirm={handleDeleteConfirm}
+        onCancel={() => setDeleteModalOpen(false)}
+        isLoading={isDeleting}
+      />
     </div>
   );
 }

@@ -4,6 +4,7 @@ import {
   subscribeToClients,
   addClient,
   updateClient,
+  editClientAndAdjustOpeningBalance,
   deleteClient,
   subscribeToClientLedgers,
   addLedgerEntry,
@@ -61,6 +62,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency } from '../utils/i18n';
+import DeleteConfirmationModal from './DeleteConfirmationModal';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, Legend
 } from 'recharts';
@@ -73,6 +75,35 @@ export default function ClientReceivables() {
 
   // Active sub-tab state
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
+
+  // Multi-delete modal states & helper
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
+  const [deleteModalTitle, setDeleteModalTitle] = useState('Confirm Deletion');
+  const [deleteModalMessage, setDeleteModalMessage] = useState('Are you sure you want to delete this record?');
+  const [deleteModalItemName, setDeleteModalItemName] = useState<string | undefined>(undefined);
+  const [deleteModalOnConfirm, setDeleteModalOnConfirm] = useState<() => Promise<void>>(() => async () => {});
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [editingSubscription, setEditingSubscription] = useState<Subscription | null>(null);
+  const [successMessage, setSuccessMessage] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
+
+  const triggerDeleteConfirmation = (title: string, message: string, itemName: string | undefined, onConfirm: () => Promise<void>) => {
+    setDeleteModalTitle(title);
+    setDeleteModalMessage(message);
+    setDeleteModalItemName(itemName);
+    setDeleteModalOnConfirm(() => async () => {
+      setIsDeleting(true);
+      try {
+        await onConfirm();
+        setDeleteModalOpen(false);
+      } catch (err) {
+        console.error('Error during deletion:', err);
+      } finally {
+        setIsDeleting(false);
+      }
+    });
+    setDeleteModalOpen(true);
+  };
 
   // Firestore DB states
   const [clients, setClients] = useState<Client[]>([]);
@@ -155,6 +186,8 @@ export default function ClientReceivables() {
   const productCategoriesList = Array.from(new Set(products.map(p => p.category).filter(Boolean))) as string[];
 
   // Form input states
+  const [editingClientId, setEditingClientId] = useState<string | null>(null);
+  const [clientFormError, setClientFormError] = useState<string | null>(null);
   const [clientForm, setClientForm] = useState({
     name: '',
     companyName: '',
@@ -163,6 +196,7 @@ export default function ClientReceivables() {
     email: '',
     address: '',
     notes: '',
+    status: 'Active' as 'Active' | 'Inactive',
     balance: 0
   });
 
@@ -190,7 +224,8 @@ export default function ClientReceivables() {
     startDate: new Date().toISOString().split('T')[0],
     renewalDate: '',
     status: 'Active' as Subscription['status'],
-    notes: ''
+    notes: '',
+    expiryDate: ''
   });
 
   // Flag to know we are quick-adding from subscription setup
@@ -370,49 +405,141 @@ export default function ClientReceivables() {
   // Actions / Submissions
   const handleCreateClient = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!clientForm.name.trim()) return;
+    setClientFormError(null);
 
-    const initialDebt = Number(clientForm.balance) || 0;
-
-    const payload = {
-      userId,
-      name: clientForm.name,
-      companyName: clientForm.companyName || '',
-      mobileNumber: clientForm.mobileNumber || '',
-      whatsAppNumber: clientForm.whatsAppNumber || '',
-      email: clientForm.email || '',
-      address: clientForm.address || '',
-      notes: clientForm.notes || '',
-      balance: 0 // Client starts in Firestore with 0 balance, then Opening Balance ledger transaction updates it. This avoids double counting.
-    };
-
-    const newId = await addClient(payload);
-    if (newId && initialDebt > 0) {
-      // Record initial balance adjustment as an 'Opening Balance' type
-      await addLedgerEntry({
-        userId,
-        clientId: newId,
-        clientName: payload.name,
-        date: new Date().toISOString().split('T')[0],
-        type: 'Opening Balance',
-        description: 'Opening Outstanding Balance Contribution',
-        debit: initialDebt,
-        credit: 0,
-        runningBalance: initialDebt
-      });
+    if (!clientForm.name.trim()) {
+      setClientFormError("Client Name is a required field.");
+      return;
     }
 
-    setShowClientModal(false);
+    const initialDebt = Number(clientForm.balance) || 0;
+    if (initialDebt < 0) {
+      setClientFormError("Initial Outstanding Debt Balance cannot be negative.");
+      return;
+    }
+
+    if (editingClientId) {
+      // Validate ownerId before updating
+      const existingClient = clients.find(c => c.id === editingClientId);
+      if (!existingClient) {
+        setClientFormError("Client records not found.");
+        return;
+      }
+      if (existingClient.userId !== userId) {
+        setClientFormError("Security Error: You do not have permission to edit this Client profile.");
+        return;
+      }
+
+      // Find the existing opening balance log entry
+      const openingEntry = ledgers.find(l => l.clientId === editingClientId && l.type === 'Opening Balance');
+
+      try {
+        await editClientAndAdjustOpeningBalance(
+          editingClientId,
+          userId,
+          {
+            name: clientForm.name,
+            companyName: clientForm.companyName || '',
+            mobileNumber: clientForm.mobileNumber || '',
+            whatsAppNumber: clientForm.whatsAppNumber || '',
+            email: clientForm.email || '',
+            address: clientForm.address || '',
+            notes: clientForm.notes || '',
+            status: clientForm.status || 'Active',
+            initialDebt
+          },
+          openingEntry,
+          existingClient.balance || 0
+        );
+
+        alert("Client profile updated successfully!");
+        setShowClientModal(false);
+        setEditingClientId(null);
+        setClientForm({
+          name: '',
+          companyName: '',
+          mobileNumber: '',
+          whatsAppNumber: '',
+          email: '',
+          address: '',
+          notes: '',
+          status: 'Active',
+          balance: 0
+        });
+      } catch (err: any) {
+        setClientFormError(err.message || "Failed to edit client profile.");
+      }
+    } else {
+      // Normal creation mode
+      try {
+        const payload = {
+          userId,
+          name: clientForm.name,
+          companyName: clientForm.companyName || '',
+          mobileNumber: clientForm.mobileNumber || '',
+          whatsAppNumber: clientForm.whatsAppNumber || '',
+          email: clientForm.email || '',
+          address: clientForm.address || '',
+          notes: clientForm.notes || '',
+          status: clientForm.status || 'Active',
+          balance: 0
+        };
+
+        const newId = await addClient(payload);
+        if (newId && initialDebt > 0) {
+          await addLedgerEntry({
+            userId,
+            clientId: newId,
+            clientName: payload.name,
+            date: new Date().toISOString().split('T')[0],
+            type: 'Opening Balance',
+            description: 'Opening Outstanding Balance Contribution',
+            debit: initialDebt,
+            credit: 0,
+            runningBalance: initialDebt
+          });
+        }
+
+        alert("Client profile created successfully!");
+        setShowClientModal(false);
+        setClientForm({
+          name: '',
+          companyName: '',
+          mobileNumber: '',
+          whatsAppNumber: '',
+          email: '',
+          address: '',
+          notes: '',
+          status: 'Active',
+          balance: 0
+        });
+      } catch (err: any) {
+        setClientFormError(err.message || "Failed to create client.");
+      }
+    }
+  };
+
+  const handleEditClientClick = (client: Client) => {
+    setEditingClientId(client.id);
+    setClientFormError(null);
+
+    // Find the opening balance if it exists
+    const openingEntry = ledgers.find(l => l.clientId === client.id && l.type === 'Opening Balance');
+    const openingBalanceAmount = openingEntry ? (openingEntry.debit || 0) : 0;
+
     setClientForm({
-      name: '',
-      companyName: '',
-      mobileNumber: '',
-      whatsAppNumber: '',
-      email: '',
-      address: '',
-      notes: '',
-      balance: 0
+      name: client.name || '',
+      companyName: client.companyName || '',
+      mobileNumber: client.mobileNumber || '',
+      whatsAppNumber: client.whatsAppNumber || '',
+      email: client.email || '',
+      address: client.address || '',
+      notes: client.notes || '',
+      status: client.status || 'Active',
+      balance: openingBalanceAmount
     });
+
+    setShowClientModal(true);
   };
 
   const handleCreateProject = async (e: React.FormEvent) => {
@@ -542,6 +669,28 @@ export default function ClientReceivables() {
     setShowProductModal(true);
   };
 
+  const handleEditSubscriptionClick = (sub: Subscription) => {
+    setEditingSubscription(sub);
+    setSubscriptionForm({
+      clientId: sub.clientId || '',
+      productId: sub.productId || '',
+      productName: sub.productName || '',
+      productCategory: sub.productCategory || '',
+      planName: sub.planName || '',
+      billingCycle: sub.billingCycle || 'Monthly',
+      subscriptionFee: sub.subscriptionFee || sub.monthlyFee || 0,
+      monthlyFee: sub.monthlyFee || 0,
+      yearlyFee: sub.yearlyFee || 0,
+      branchCount: sub.branchCount || 1,
+      startDate: sub.startDate || '',
+      renewalDate: sub.renewalDate || '',
+      status: sub.status || 'Active',
+      notes: sub.notes || '',
+      expiryDate: sub.expiryDate || ''
+    });
+    setShowSubscriptionModal(true);
+  };
+
   const toggleProdSort = (field: 'name' | 'code' | 'category' | 'monthlyPrice' | 'yearlyPrice') => {
     if (productSortField === field) {
       setProductSortOrder(productSortOrder === 'asc' ? 'desc' : 'asc');
@@ -559,7 +708,7 @@ export default function ClientReceivables() {
     const matchedClient = clients.find(c => c.id === subscriptionForm.clientId);
     if (!matchedClient) return;
 
-    const payload = {
+    const payload: any = {
       userId,
       clientId: subscriptionForm.clientId,
       clientName: matchedClient.name,
@@ -577,27 +726,55 @@ export default function ClientReceivables() {
       subscriptionFee: Number(subscriptionForm.subscriptionFee),
       productCategory: subscriptionForm.productCategory,
       branchCount: Number(subscriptionForm.branchCount) || 1,
-      yearlyFee: Number(subscriptionForm.yearlyFee) || 0
+      yearlyFee: Number(subscriptionForm.yearlyFee) || 0,
+      expiryDate: subscriptionForm.expiryDate || ''
     };
 
-    await addSubscription(payload);
-    setShowSubscriptionModal(false);
-    setSubscriptionForm({
-      clientId: '',
-      productId: '',
-      productName: '',
-      productCategory: '',
-      planName: '',
-      billingCycle: 'Monthly',
-      subscriptionFee: 0,
-      monthlyFee: 0,
-      yearlyFee: 0,
-      branchCount: 1,
-      startDate: new Date().toISOString().split('T')[0],
-      renewalDate: '',
-      status: 'Active',
-      notes: ''
-    });
+    try {
+      if (editingSubscription) {
+        // Validate user owner
+        if (editingSubscription.userId !== userId) {
+          setErrorMessage("Unauthorized: You can only edit your own contracts.");
+          setTimeout(() => setErrorMessage(''), 4000);
+          return;
+        }
+
+        // Add / Update updatedAt
+        payload.updatedAt = new Date().toISOString();
+
+        await updateSubscription(editingSubscription.id, payload);
+        setSuccessMessage("Contract updated successfully!");
+        setTimeout(() => setSuccessMessage(''), 4000);
+      } else {
+        await addSubscription(payload);
+        setSuccessMessage("Contract established successfully!");
+        setTimeout(() => setSuccessMessage(''), 4000);
+      }
+
+      setShowSubscriptionModal(false);
+      setEditingSubscription(null);
+      setSubscriptionForm({
+        clientId: '',
+        productId: '',
+        productName: '',
+        productCategory: '',
+        planName: '',
+        billingCycle: 'Monthly',
+        subscriptionFee: 0,
+        monthlyFee: 0,
+        yearlyFee: 0,
+        branchCount: 1,
+        startDate: new Date().toISOString().split('T')[0],
+        renewalDate: '',
+        status: 'Active',
+        notes: '',
+        expiryDate: ''
+      });
+    } catch (error) {
+      console.error("Error saving subscription:", error);
+      setErrorMessage(editingSubscription ? "Failed to update contract." : "Failed to establish contract.");
+      setTimeout(() => setErrorMessage(''), 4000);
+    }
   };
 
   const handleRenewSubscription = async (sub: Subscription) => {
@@ -807,33 +984,59 @@ export default function ClientReceivables() {
 
         <div className="flex flex-wrap gap-2">
           <button
-            onClick={() => setShowClientModal(true)}
+            onClick={() => {
+              setEditingClientId(null);
+              setClientFormError(null);
+              setClientForm({
+                name: '',
+                companyName: '',
+                mobileNumber: '',
+                whatsAppNumber: '',
+                email: '',
+                address: '',
+                notes: '',
+                status: 'Active',
+                balance: 0
+              });
+              setShowClientModal(true);
+            }}
             id="add-client-nav-btn"
             className="flex items-center gap-2 bg-zinc-950 dark:bg-zinc-50 dark:text-zinc-950 text-white rounded-xl px-4 py-2.5 text-xs font-semibold hover:opacity-90 transition-all shadow-md"
           >
-            <Plus size={16} /> Add Client
+            <Plus size={16} /> Client
           </button>
           <button
             onClick={() => setShowPaymentModal(true)}
             id="add-payment-nav-btn"
             className="flex items-center gap-2 bg-emerald-600 text-white rounded-xl px-4 py-2.5 text-xs font-semibold hover:bg-emerald-700 transition-all shadow-md"
           >
-            <Plus size={16} /> Collect Payment
+            <Plus size={16} /> Collect
           </button>
         </div>
       </div>
+
+      {successMessage && (
+        <div className="p-3 bg-emerald-55 dark:bg-emerald-950/25 text-emerald-850 dark:text-emerald-400 rounded-xl text-center font-semibold border border-emerald-200 dark:border-emerald-800 animate-fadeIn text-xs">
+          {successMessage}
+        </div>
+      )}
+      {errorMessage && (
+        <div className="p-3 bg-rose-55 dark:bg-rose-950/25 text-rose-850 dark:text-rose-400 rounded-xl text-center font-semibold border border-rose-200 dark:border-rose-800 animate-fadeIn text-xs">
+          {errorMessage}
+        </div>
+      )}
 
       {/* Module Navigation Tabs */}
       <div className="flex overflow-x-auto no-scrollbar border-b border-zinc-200 dark:border-zinc-805 gap-1 pb-1">
         {[
           { tab: 'dashboard', name: 'Dashboard', icon: Users },
-          { tab: 'clients', name: 'Active Clients', icon: Users },
+          { tab: 'clients', name: 'Clients', icon: Users },
           { tab: 'products', name: 'Products', icon: Package },
-          { tab: 'projects', name: 'Software Projects', icon: Briefcase },
-          { tab: 'subscriptions', name: 'Contracts / Subscriptions', icon: CreditCard },
-          { tab: 'receivables', name: 'Receivable Invoices', icon: TrendingUp },
-          { tab: 'payments', name: 'Payment Log', icon: DollarSign },
-          { tab: 'reports', name: 'Revenue Reports', icon: BarChart3 }
+          { tab: 'projects', name: 'Projects', icon: Briefcase },
+          { tab: 'subscriptions', name: 'Contracts', icon: CreditCard },
+          { tab: 'receivables', name: 'Receivable', icon: TrendingUp },
+          { tab: 'payments', name: 'Payment', icon: DollarSign },
+          { tab: 'reports', name: 'Reports', icon: BarChart3 }
         ].map(item => (
           <button
             key={item.tab}
@@ -1005,7 +1208,7 @@ export default function ClientReceivables() {
       {activeTab === 'clients' && (
         <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 p-5 shadow-sm space-y-4">
           <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3">
-            <h2 className="text-xl font-bold">Accounts Directory</h2>
+            <h2 className="text-xl font-bold">Clients</h2>
             <div className="flex bg-zinc-100 dark:bg-zinc-800 rounded-xl px-3 py-1.5 items-center gap-2 w-full sm:max-w-xs">
               <Search className="text-zinc-400 shrink-0" size={16} />
               <input
@@ -1042,6 +1245,11 @@ export default function ClientReceivables() {
                     >
                       <td className="py-3.5 px-4 font-semibold text-zinc-900 dark:text-zinc-50">
                         {client.name}
+                        {client.status === 'Inactive' && (
+                          <span className="ml-2 bg-rose-50 text-rose-500 dark:bg-rose-950/20 dark:text-rose-400 text-[9px] font-bold px-1.5 py-0.5 rounded uppercase">
+                            Inactive
+                          </span>
+                        )}
                         <span className="block text-[10px] text-zinc-400 font-normal">{client.email || 'No email'}</span>
                       </td>
                       <td className="py-3.5 px-4 text-zinc-500 dark:text-zinc-400">{client.companyName || '-'}</td>
@@ -1069,10 +1277,21 @@ export default function ClientReceivables() {
                           Ledger <BookOpen size={11} />
                         </button>
                         <button
+                          onClick={() => handleEditClientClick(client)}
+                          className="bg-zinc-100 text-zinc-900 hover:bg-zinc-250 dark:bg-zinc-800 dark:text-zinc-200 rounded-lg px-2.5 py-1 text-[11px] font-bold tracking-tight inline-flex items-center gap-1"
+                        >
+                          Edit <Edit2 size={11} />
+                        </button>
+                        <button
                           onClick={() => {
-                            if (confirm(`Do you want to delete client ${client.name}?`)) {
-                              deleteClient(client.id);
-                            }
+                            triggerDeleteConfirmation(
+                              'Confirm Deletion',
+                              'Are you sure you want to delete this client? This action cannot be undone.',
+                              `Client: ${client.name}`,
+                              async () => {
+                                await deleteClient(client.id);
+                              }
+                            );
                           }}
                           className="text-zinc-400 hover:text-rose-500 p-1"
                         >
@@ -1175,9 +1394,14 @@ export default function ClientReceivables() {
                       <td className="py-3.5 px-4 text-right">
                         <button
                           onClick={() => {
-                            if (confirm(`Remove custom project details for ${proj.projectName}?`)) {
-                              deleteProject(proj.id);
-                            }
+                            triggerDeleteConfirmation(
+                              'Confirm Deletion',
+                              'Are you sure you want to remove custom project details? This action cannot be undone.',
+                              `Project: ${proj.projectName}`,
+                              async () => {
+                                await deleteProject(proj.id);
+                              }
+                            );
                           }}
                           className="hover:text-rose-500 text-zinc-400 transition-colors p-2"
                         >
@@ -1197,12 +1421,32 @@ export default function ClientReceivables() {
         <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 p-5 shadow-sm space-y-4">
           <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3">
             <div className="flex items-center gap-4">
-              <h2 className="text-xl font-bold">POS & SaaS contracts</h2>
+              <h2 className="text-xl font-bold">Contracts</h2>
               <button
-                onClick={() => setShowSubscriptionModal(true)}
+                onClick={() => {
+                  setEditingSubscription(null);
+                  setSubscriptionForm({
+                    clientId: '',
+                    productId: '',
+                    productName: '',
+                    productCategory: '',
+                    planName: '',
+                    billingCycle: 'Monthly',
+                    subscriptionFee: 0,
+                    monthlyFee: 0,
+                    yearlyFee: 0,
+                    branchCount: 1,
+                    startDate: new Date().toISOString().split('T')[0],
+                    renewalDate: '',
+                    status: 'Active',
+                    notes: '',
+                    expiryDate: ''
+                  });
+                  setShowSubscriptionModal(true);
+                }}
                 className="bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-900 dark:text-zinc-100 font-bold text-xs rounded-xl px-3 py-1.5 flex items-center gap-1"
               >
-                <Plus size={14} /> New Contract
+                <Plus size={14} /> Contract
               </button>
             </div>
 
@@ -1281,10 +1525,22 @@ export default function ClientReceivables() {
                             <Repeat size={11} /> Renew
                           </button>
                           <button
+                            onClick={() => handleEditSubscriptionClick(sub)}
+                            className="hover:text-blue-500 text-zinc-400 p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                            title="Edit Contract"
+                          >
+                            <Edit2 size={13} />
+                          </button>
+                          <button
                             onClick={() => {
-                              if (confirm(`Delete the recurring contract ${sub.productName}?`)) {
-                                deleteSubscription(sub.id);
-                              }
+                              triggerDeleteConfirmation(
+                                'Confirm Deletion',
+                                'Are you sure you want to delete this recurring contract? This action cannot be undone.',
+                                `Contract: ${sub.productName}`,
+                                async () => {
+                                  await deleteSubscription(sub.id);
+                                }
+                              );
                             }}
                             className="hover:text-rose-500 text-zinc-400 p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
                             title="Delete Contract"
@@ -1394,9 +1650,14 @@ export default function ClientReceivables() {
                         <td className="py-3.5 px-4 text-right">
                           <button
                             onClick={() => {
-                              if (confirm(`Are you sure you want to void Invoice ${rec.invoiceNumber}?`)) {
-                                deleteReceivable(rec.id);
-                              }
+                              triggerDeleteConfirmation(
+                                'Confirm Deletion',
+                                'Are you sure you want to void this invoice? This action cannot be undone.',
+                                `Invoice: ${rec.invoiceNumber}`,
+                                async () => {
+                                  await deleteReceivable(rec.id);
+                                }
+                              );
                             }}
                             className="hover:text-rose-500 text-zinc-400 p-2"
                           >
@@ -1467,9 +1728,14 @@ export default function ClientReceivables() {
                       <td className="py-3.5 px-4 text-right">
                         <button
                           onClick={() => {
-                            if (confirm(`Void payment collection of ${renderMoney(pay.amount)} from ${pay.clientName}? Balance will automatically adjustment reconcile.`)) {
-                              deletePayment(pay.id);
-                            }
+                            triggerDeleteConfirmation(
+                              'Confirm Deletion',
+                              'Are you sure you want to void this payment collection? Balance will automatically adjustment reconcile. This action cannot be undone.',
+                              `Payment: ${renderMoney(pay.amount)} from ${pay.clientName}`,
+                              async () => {
+                                await deletePayment(pay.id);
+                              }
+                            );
                           }}
                           className="hover:text-rose-500 text-zinc-400 p-2"
                         >
@@ -1666,10 +1932,15 @@ export default function ClientReceivables() {
                             <Edit2 size={13} />
                           </button>
                           <button
-                            onClick={async () => {
-                              if (confirm(`Are you sure you want to delete product "${prod.name}"?`)) {
-                                await deleteProduct(prod.id);
-                              }
+                            onClick={() => {
+                              triggerDeleteConfirmation(
+                                'Confirm Deletion',
+                                'Are you sure you want to delete this product? This action cannot be undone.',
+                                `Product: ${prod.name}`,
+                                async () => {
+                                  await deleteProduct(prod.id);
+                                }
+                              );
                             }}
                             className="hover:text-rose-500 text-zinc-400 p-1.5 rounded-lg transition-colors cursor-pointer"
                             title="Delete Product"
@@ -2057,8 +2328,14 @@ export default function ClientReceivables() {
                 <X size={16} />
               </button>
               <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
-                <Users size={18} /> Add Client Profile
+                <Users size={18} /> {editingClientId ? 'Edit Client Profile' : 'Add Client Profile'}
               </h2>
+              {clientFormError && (
+                <div id="client-form-error" className="bg-rose-50 dark:bg-rose-950/20 text-rose-500 dark:text-rose-400 p-3 rounded-xl flex items-center gap-2 mb-4 text-xs font-semibold">
+                  <AlertCircle size={16} className="shrink-0" />
+                  <span>{clientFormError}</span>
+                </div>
+              )}
               <form onSubmit={handleCreateClient} className="space-y-4 text-xs">
                 <div className="space-y-1">
                   <label className="text-zinc-500 font-medium">Client Name *</label>
@@ -2124,20 +2401,43 @@ export default function ClientReceivables() {
                   />
                 </div>
                 <div className="space-y-1">
-                  <label className="text-zinc-500 font-medium">Initial Outstanding Debt Balances</label>
-                  <input
-                    type="number"
-                    value={clientForm.balance}
-                    onChange={e => setClientForm({ ...clientForm, balance: Number(e.target.value) })}
-                    className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-3 py-2.5 outline-none font-mono"
-                    placeholder="Opening balance e.g., 500"
+                  <label className="text-zinc-500 font-medium">Notes</label>
+                  <textarea
+                    value={clientForm.notes}
+                    onChange={e => setClientForm({ ...clientForm, notes: e.target.value })}
+                    rows={2}
+                    className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-3 py-2 outline-none font-sans"
+                    placeholder="e.g. contract comments, special billing needs..."
                   />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-zinc-500 font-medium">Status *</label>
+                    <select
+                      value={clientForm.status || 'Active'}
+                      onChange={e => setClientForm({ ...clientForm, status: e.target.value as 'Active' | 'Inactive' })}
+                      className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-3 py-2.5 outline-none font-semibold text-zinc-900 dark:text-zinc-100"
+                    >
+                      <option value="Active">Active</option>
+                      <option value="Inactive">Inactive</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-zinc-500 font-medium">Initial Outstanding Debt Balances</label>
+                    <input
+                      type="number"
+                      value={clientForm.balance}
+                      onChange={e => setClientForm({ ...clientForm, balance: Number(e.target.value) })}
+                      className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-3 py-2.5 outline-none font-mono"
+                      placeholder="Opening balance e.g., 500"
+                    />
+                  </div>
                 </div>
                 <button
                   type="submit"
                   className="w-full bg-zinc-950 dark:bg-zinc-50 dark:text-zinc-950 text-white font-bold py-2.5 rounded-xl mt-2 tracking-wide"
                 >
-                  Create Client Account
+                  {editingClientId ? 'Save Changes' : 'Create Client Account'}
                 </button>
               </form>
             </motion.div>
@@ -2266,7 +2566,7 @@ export default function ClientReceivables() {
                 <X size={16} />
               </button>
               <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
-                <CreditCard size={18} /> Establish Subscription Contract
+                <CreditCard size={18} /> {editingSubscription ? 'Edit Subscription Contract' : 'Establish Subscription Contract'}
               </h2>
               <form onSubmit={handleCreateSubscription} className="space-y-4 text-xs">
                 <div className="space-y-1">
@@ -2435,7 +2735,7 @@ export default function ClientReceivables() {
                   </div>
 
                   <div className="space-y-1">
-                    <label className="text-zinc-500 font-medium">Calculated Fee *</label>
+                    <label className="text-zinc-500 font-medium font-semibold">Calculated Fee *</label>
                     <input
                       type="number"
                       required
@@ -2449,8 +2749,35 @@ export default function ClientReceivables() {
                   </div>
                 </div>
 
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-zinc-500 font-medium font-semibold">Monthly Fee *</label>
+                    <input
+                      type="number"
+                      required
+                      min="0"
+                      step="0.01"
+                      value={subscriptionForm.monthlyFee}
+                      onChange={e => setSubscriptionForm({ ...subscriptionForm, monthlyFee: Number(e.target.value) })}
+                      className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-3 py-2.5 outline-none font-mono font-semibold"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-zinc-500 font-medium font-semibold">Yearly Fee *</label>
+                    <input
+                      type="number"
+                      required
+                      min="0"
+                      step="0.01"
+                      value={subscriptionForm.yearlyFee}
+                      onChange={e => setSubscriptionForm({ ...subscriptionForm, yearlyFee: Number(e.target.value) })}
+                      className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-3 py-2.5 outline-none font-mono font-semibold"
+                    />
+                  </div>
+                </div>
+
                 <div className="space-y-1">
-                  <label className="text-zinc-500 font-medium">Plan Contract Code / Reference</label>
+                  <label className="text-zinc-500 font-medium font-semibold">Plan Contract Code / Reference</label>
                   <input
                     type="text"
                     value={subscriptionForm.planName}
@@ -2459,30 +2786,39 @@ export default function ClientReceivables() {
                     placeholder="e.g. POS-Monthly, Tier-1-Enterprise"
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-3 gap-3">
                   <div className="space-y-1">
-                    <label className="text-zinc-500 font-medium">Start Date *</label>
+                    <label className="text-zinc-500 font-medium font-semibold">Start Date *</label>
                     <input
                       type="date"
                       required
                       value={subscriptionForm.startDate}
                       onChange={e => setSubscriptionForm({ ...subscriptionForm, startDate: e.target.value })}
-                      className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-3 py-2.5 outline-none font-mono"
+                      className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-1.5 py-2.5 outline-none font-mono text-[10px]"
                     />
                   </div>
                   <div className="space-y-1">
-                    <label className="text-zinc-500 font-medium">Next Renewal Date *</label>
+                    <label className="text-zinc-500 font-medium font-semibold">Renewal Date *</label>
                     <input
                       type="date"
                       required
                       value={subscriptionForm.renewalDate}
                       onChange={e => setSubscriptionForm({ ...subscriptionForm, renewalDate: e.target.value })}
-                      className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-3 py-2.5 outline-none font-mono"
+                      className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-1.5 py-2.5 outline-none font-mono text-[10px]"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-zinc-500 font-medium font-semibold">Expiry Date</label>
+                    <input
+                      type="date"
+                      value={subscriptionForm.expiryDate || ''}
+                      onChange={e => setSubscriptionForm({ ...subscriptionForm, expiryDate: e.target.value })}
+                      className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-1.5 py-2.5 outline-none font-mono text-[10px]"
                     />
                   </div>
                 </div>
                 <div className="space-y-1">
-                  <label className="text-zinc-500 font-medium">Status State</label>
+                  <label className="text-zinc-500 font-medium font-semibold">Status State</label>
                   <select
                     value={subscriptionForm.status}
                     onChange={e => setSubscriptionForm({ ...subscriptionForm, status: e.target.value as Subscription['status'] })}
@@ -2493,6 +2829,16 @@ export default function ClientReceivables() {
                     <option value="Cancelled">Cancelled</option>
                     <option value="Past Due">Past Due</option>
                   </select>
+                </div>
+                
+                <div className="space-y-1">
+                  <label className="text-zinc-500 font-medium font-semibold">Notes / Discussion Terms</label>
+                  <textarea
+                    value={subscriptionForm.notes || ''}
+                    onChange={e => setSubscriptionForm({ ...subscriptionForm, notes: e.target.value })}
+                    className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-3 py-2 outline-none h-16 resize-none"
+                    placeholder="Enter special pricing agreements or details..."
+                  />
                 </div>
                 
                 {/* LIVE CALCULATED PRICE PREVIEW */}
@@ -2553,7 +2899,7 @@ export default function ClientReceivables() {
                   type="submit"
                   className="w-full bg-zinc-950 dark:bg-zinc-50 dark:text-zinc-950 text-white font-bold py-2.5 rounded-xl tracking-wide"
                 >
-                  Confirm Subscription Fee Setup
+                  {editingSubscription ? 'Save Contract Changes' : 'Confirm Subscription Fee Setup'}
                 </button>
               </form>
             </motion.div>
@@ -2897,9 +3243,14 @@ export default function ClientReceivables() {
                             <td className="py-3 px-3 text-right">
                               <button
                                 onClick={() => {
-                                  if (confirm('Are you sure you want to delete this custom ledger entry? Client running balance will adjust back.')) {
-                                    deleteLedgerEntry(log.id);
-                                  }
+                                  triggerDeleteConfirmation(
+                                    'Confirm Deletion',
+                                    'Are you sure you want to delete this custom ledger entry? Client running balance will adjust back. This action cannot be undone.',
+                                    `Ledger Entry: ${log.description || 'No description'}`,
+                                    async () => {
+                                      await deleteLedgerEntry(log.id);
+                                    }
+                                  );
                                 }}
                                 className="text-zinc-350 hover:text-rose-500 transition-colors p-1"
                               >
@@ -2996,6 +3347,16 @@ export default function ClientReceivables() {
           </div>
         )}
       </AnimatePresence>
+
+      <DeleteConfirmationModal
+        isOpen={deleteModalOpen}
+        title={deleteModalTitle}
+        message={deleteModalMessage}
+        itemName={deleteModalItemName}
+        onConfirm={deleteModalOnConfirm}
+        onCancel={() => setDeleteModalOpen(false)}
+        isLoading={isDeleting}
+      />
     </div>
   );
 }
