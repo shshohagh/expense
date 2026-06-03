@@ -16,7 +16,7 @@ import {
   writeBatch
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
-import { Transaction, Category, Budget, Loan, LoanRepayment, Client, ClientLedger, Project, Subscription, Receivable, PaymentCollection } from '../types';
+import { Transaction, Category, Budget, Loan, LoanRepayment, Client, ClientLedger, Project, Subscription, Receivable, PaymentCollection, Quotation, QuotationItem } from '../types';
 
 // Helper to handle Firestore errors
 const handleFirestoreError = (error: any, operation: string, path: string) => {
@@ -1181,4 +1181,137 @@ export const deletePayment = async (id: string) => {
     handleFirestoreError(error, 'DELETE', `payments/${id}`);
   }
 };
+
+// --- Quotations Management ---
+export const subscribeToQuotations = (userId: string, callback: (quotations: Quotation[]) => void) => {
+  const q = query(
+    collection(db, 'quotations'),
+    where('ownerId', '==', userId)
+  );
+
+  return onSnapshot(q, (snapshot) => {
+    const quotations = snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    })) as Quotation[];
+    quotations.sort((a, b) => new Date(b.quotationDate).getTime() - new Date(a.quotationDate).getTime());
+    callback(quotations);
+  }, (error) => handleFirestoreError(error, 'LIST', 'quotations'));
+};
+
+export const subscribeToAllQuotationItems = (userId: string, callback: (items: QuotationItem[]) => void) => {
+  const q = query(
+    collection(db, 'quotation_items'),
+    where('ownerId', '==', userId)
+  );
+
+  return onSnapshot(q, (snapshot) => {
+    const items = snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    })) as QuotationItem[];
+    callback(items);
+  }, (error) => handleFirestoreError(error, 'LIST', 'quotation_items'));
+};
+
+export const addQuotation = async (
+  quotation: Omit<Quotation, 'id' | 'createdAt' | 'updatedAt'>,
+  items: Omit<QuotationItem, 'id' | 'ownerId' | 'quotationId'>[]
+) => {
+  try {
+    const batch = writeBatch(db);
+    
+    // Create quotation document reference
+    const quotationRef = doc(collection(db, 'quotations'));
+    const quotationId = quotationRef.id;
+
+    batch.set(quotationRef, {
+      ...quotation,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+
+    // Create item document references
+    for (const item of items) {
+      const itemRef = doc(collection(db, 'quotation_items'));
+      batch.set(itemRef, {
+        ...item,
+        ownerId: quotation.ownerId,
+        quotationId: quotationId
+      });
+    }
+
+    await batch.commit();
+    return quotationId;
+  } catch (error) {
+    handleFirestoreError(error, 'CREATE', 'quotations');
+  }
+};
+
+export const updateQuotation = async (
+  id: string,
+  quotationData: Partial<Quotation>,
+  items?: Omit<QuotationItem, 'id' | 'ownerId' | 'quotationId'>[]
+) => {
+  try {
+    const batch = writeBatch(db);
+    const quotationRef = doc(db, 'quotations', id);
+
+    batch.update(quotationRef, {
+      ...quotationData,
+      updatedAt: serverTimestamp()
+    });
+
+    if (items) {
+      // 1. Delete all existing items for this quotation ID
+      const itemsSnapshot = await getDocs(
+        query(
+          collection(db, 'quotation_items'),
+          where('quotationId', '==', id)
+        )
+      );
+      itemsSnapshot.forEach(itemDoc => {
+        batch.delete(itemDoc.ref);
+      });
+
+      // 2. Add the new items
+      const ownerId = quotationData.ownerId || (await getDoc(quotationRef)).data()?.ownerId;
+      for (const item of items) {
+        const itemRef = doc(collection(db, 'quotation_items'));
+        batch.set(itemRef, {
+          ...item,
+          ownerId,
+          quotationId: id
+        });
+      }
+    }
+
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, 'UPDATE', `quotations/${id}`);
+  }
+};
+
+export const deleteQuotation = async (id: string) => {
+  try {
+    const batch = writeBatch(db);
+    batch.delete(doc(db, 'quotations', id));
+
+    // Delete associated items
+    const itemsSnapshot = await getDocs(
+      query(
+        collection(db, 'quotation_items'),
+        where('quotationId', '==', id)
+      )
+    );
+    itemsSnapshot.forEach(itemDoc => {
+      batch.delete(itemDoc.ref);
+    });
+
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, 'DELETE', `quotations/${id}`);
+  }
+};
+
 

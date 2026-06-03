@@ -210,6 +210,23 @@ service cloud.firestore {
              data.paymentMethod in ["Cash", "Bank Transfer", "Mobile Banking", "Check", "SaaS Gateway", "Other"];
     }
 
+    function isValidQuotation(data) {
+      return data.ownerId == request.auth.uid &&
+             data.clientId is string &&
+             data.quotationNumber is string &&
+             data.status in ["Draft", "Sent", "Accepted", "Rejected", "Expired"] &&
+             data.totalAmount is number;
+    }
+
+    function isValidQuotationItem(data) {
+      return data.ownerId == request.auth.uid &&
+             data.quotationId is string &&
+             data.itemName is string &&
+             data.quantity is number &&
+             data.unitPrice is number &&
+             data.total is number;
+    }
+
     // ===============================================================
     // Rules
     // ===============================================================
@@ -313,6 +330,20 @@ service cloud.firestore {
       allow create: if isApproved() && isValidPayment(request.resource.data);
       allow update: if isApproved() && isValidPayment(request.resource.data) && (isDocOwner() || isAdmin());
       allow delete: if isApproved() && (isDocOwner() || isAdmin());
+    }
+
+    match /quotations/{quotationId} {
+      allow read: if (isAuthenticated() && resource.data.ownerId == request.auth.uid) || isAdmin();
+      allow create: if isApproved() && isValidQuotation(request.resource.data);
+      allow update: if isApproved() && isValidQuotation(request.resource.data) && ((isAuthenticated() && resource.data.ownerId == request.auth.uid) || isAdmin());
+      allow delete: if isApproved() && ((isAuthenticated() && resource.data.ownerId == request.auth.uid) || isAdmin());
+    }
+
+    match /quotation_items/{itemId} {
+      allow read: if (isAuthenticated() && resource.data.ownerId == request.auth.uid) || isAdmin();
+      allow create: if isApproved() && isValidQuotationItem(request.resource.data);
+      allow update: if isApproved() && isValidQuotationItem(request.resource.data) && ((isAuthenticated() && resource.data.ownerId == request.auth.uid) || isAdmin());
+      allow delete: if isApproved() && ((isAuthenticated() && resource.data.ownerId == request.auth.uid) || isAdmin());
     }
   }
 }

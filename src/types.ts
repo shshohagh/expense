@@ -172,3 +172,33 @@ export interface PaymentCollection {
   deleted_at?: any;
 }
 
+export interface Quotation {
+  id: string;
+  ownerId: string;
+  clientId: string;
+  clientName: string;
+  quotationNumber: string;
+  status: 'Draft' | 'Sent' | 'Accepted' | 'Rejected' | 'Expired';
+  totalAmount: number;
+  quotationDate: string;
+  validUntilDate: string;
+  projectName: string;
+  description: string;
+  createdAt: any;
+  updatedAt: any;
+}
+
+export interface QuotationItem {
+  id: string;
+  ownerId: string;
+  quotationId: string;
+  itemName: string;
+  description?: string;
+  quantity: number;
+  unitPrice: number;
+  discount: number; // percentage (e.g. 10 for 10%)
+  tax: number; // percentage (e.g. 5 for 5%)
+  total: number;
+}
+
+

@@ -211,6 +211,42 @@
         "deleted_at": { "type": "string", "format": "date-time" }
       },
       "required": ["userId", "clientId", "clientName", "amount", "paymentDate", "paymentMethod"]
+    },
+    "Quotation": {
+      "title": "Quotation",
+      "description": "A quotation for project or service",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string" },
+        "clientId": { "type": "string" },
+        "quotationNumber": { "type": "string" },
+        "status": { "type": "string", "enum": ["Draft", "Sent", "Accepted", "Rejected", "Expired"] },
+        "totalAmount": { "type": "number" },
+        "quotationDate": { "type": "string", "format": "date" },
+        "validUntilDate": { "type": "string", "format": "date" },
+        "projectName": { "type": "string" },
+        "description": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "clientId", "quotationNumber", "status", "totalAmount"]
+    },
+    "QuotationItem": {
+      "title": "QuotationItem",
+      "description": "A line item for a quotation",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string" },
+        "quotationId": { "type": "string" },
+        "itemName": { "type": "string" },
+        "description": { "type": "string" },
+        "quantity": { "type": "number" },
+        "unitPrice": { "type": "number" },
+        "discount": { "type": "number" },
+        "tax": { "type": "number" },
+        "total": { "type": "number" }
+      },
+      "required": ["ownerId", "quotationId", "itemName", "quantity", "unitPrice", "total"]
     }
   },
   "firestore": {
@@ -261,6 +297,14 @@
     "/payments/{paymentId}": {
       "schema": "PaymentCollection",
       "description": "Client cash collection entries"
+    },
+    "/quotations/{quotationId}": {
+      "schema": "Quotation",
+      "description": "Quotation details"
+    },
+    "/quotation_items/{itemId}": {
+      "schema": "QuotationItem",
+      "description": "Line items of quotations"
     }
   }
 }
