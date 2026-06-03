@@ -16,7 +16,7 @@ import {
   writeBatch
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
-import { Transaction, Category, Budget } from '../types';
+import { Transaction, Category, Budget, Loan, LoanRepayment } from '../types';
 
 // Helper to handle Firestore errors
 const handleFirestoreError = (error: any, operation: string, path: string) => {
@@ -635,4 +635,107 @@ export const subscribeToAllActivityLogs = (callback: (data: any[]) => void) => {
     const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     callback(data);
   }, (error) => handleFirestoreError(error, 'LIST', 'activity_logs'));
+};
+
+// Loans & Loan Repayments
+export const subscribeToLoans = (userId: string, callback: (loans: Loan[]) => void) => {
+  const q = query(
+    collection(db, 'loans'),
+    where('userId', '==', userId),
+    where('deleted_at', '==', null)
+  );
+  
+  return onSnapshot(q, (snapshot) => {
+    const loans = snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    })) as Loan[];
+    
+    // Sort by givenDate descending
+    loans.sort((a, b) => new Date(b.givenDate).getTime() - new Date(a.givenDate).getTime());
+    
+    callback(loans);
+  }, (error) => handleFirestoreError(error, 'LIST', 'loans'));
+};
+
+export const addLoan = async (loan: Omit<Loan, 'id' | 'created_at'>) => {
+  try {
+    const docRef = await addDoc(collection(db, 'loans'), {
+      ...loan,
+      created_at: serverTimestamp(),
+      deleted_at: null
+    });
+    return docRef.id;
+  } catch (error) {
+    handleFirestoreError(error, 'CREATE', 'loans');
+  }
+};
+
+export const updateLoan = async (id: string, data: Partial<Loan>) => {
+  try {
+    await updateDoc(doc(db, 'loans', id), data);
+  } catch (error) {
+    handleFirestoreError(error, 'UPDATE', `loans/${id}`);
+  }
+};
+
+export const deleteLoan = async (id: string) => {
+  try {
+    await updateDoc(doc(db, 'loans', id), {
+      deleted_at: serverTimestamp()
+    });
+  } catch (error) {
+    handleFirestoreError(error, 'DELETE', `loans/${id}`);
+  }
+};
+
+export const subscribeToRepayments = (userId: string, callback: (repayments: LoanRepayment[]) => void) => {
+  const q = query(
+    collection(db, 'loan_repayments'),
+    where('userId', '==', userId),
+    where('deleted_at', '==', null)
+  );
+  
+  return onSnapshot(q, (snapshot) => {
+    const repayments = snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    })) as LoanRepayment[];
+    
+    // Sort by repaymentDate descending
+    repayments.sort((a, b) => new Date(b.repaymentDate).getTime() - new Date(a.repaymentDate).getTime());
+    
+    callback(repayments);
+  }, (error) => handleFirestoreError(error, 'LIST', 'loan_repayments'));
+};
+
+export const addRepayment = async (repayment: Omit<LoanRepayment, 'id' | 'created_at'>) => {
+  try {
+    const docRef = await addDoc(collection(db, 'loan_repayments'), {
+      ...repayment,
+      created_at: serverTimestamp(),
+      deleted_at: null
+    });
+    return docRef.id;
+  } catch (error) {
+    handleFirestoreError(error, 'CREATE', 'loan_repayments');
+  }
+};
+
+export const updateRepayment = async (id: string, data: Partial<LoanRepayment>) => {
+  try {
+    await updateDoc(doc(db, 'loan_repayments', id), data);
+  } catch (error) {
+    handleFirestoreError(error, 'UPDATE', `loan_repayments/${id}`);
+  }
+};
+
+export const deleteRepayment = async (id: string) => {
+  try {
+    await updateDoc(doc(db, 'loan_repayments', id), {
+      deleted_at: serverTimestamp()
+    });
+  } catch (error) {
+    handleFirestoreError(error, 'DELETE', `loan_repayments/${id}`);
+  }
 };

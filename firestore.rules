@@ -152,6 +152,24 @@ service cloud.firestore {
              data.details is string && data.details.size() < 1000;
     }
 
+    function isValidLoan(data) {
+      return data.keys().hasOverlapping(['userId', 'borrowerName', 'amount', 'givenDate', 'expectedReturnDate', 'status']) &&
+             data.userId == request.auth.uid &&
+             data.borrowerName is string && data.borrowerName.size() > 0 && data.borrowerName.size() < 100 &&
+             data.amount is number &&
+             data.givenDate is string &&
+             data.expectedReturnDate is string &&
+             data.status in ['Pending', 'Partially Paid', 'Paid'];
+    }
+
+    function isValidRepayment(data) {
+      return data.keys().hasOverlapping(['userId', 'loanId', 'repaymentAmount', 'repaymentDate']) &&
+             data.userId == request.auth.uid &&
+             data.loanId is string && data.loanId.size() > 0 &&
+             data.repaymentAmount is number &&
+             data.repaymentDate is string;
+    }
+
     // ===============================================================
     // Rules
     // ===============================================================
@@ -194,6 +212,20 @@ service cloud.firestore {
     match /activity_logs/{logId} {
       allow read: if isDocOwner() || isAdmin();
       allow create: if isApproved() && isValidActivity(request.resource.data);
+    }
+
+    match /loans/{loanId} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isApproved() && isValidLoan(request.resource.data);
+      allow update: if isApproved() && isValidLoan(request.resource.data) && (isDocOwner() || isAdmin());
+      allow delete: if isApproved() && (isDocOwner() || isAdmin());
+    }
+
+    match /loan_repayments/{repaymentId} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isApproved() && isValidRepayment(request.resource.data);
+      allow update: if isApproved() && isValidRepayment(request.resource.data) && (isDocOwner() || isAdmin());
+      allow delete: if isApproved() && (isDocOwner() || isAdmin());
     }
 
     match /role_permissions/{role} {

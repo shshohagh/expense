@@ -52,3 +52,30 @@ export interface Budget {
   created_at: string;
   isDemo?: boolean;
 }
+
+export interface Loan {
+  id: string;
+  userId: string;
+  borrowerName: string;
+  mobileNumber?: string;
+  amount: number;
+  givenDate: string;
+  expectedReturnDate: string;
+  notes?: string;
+  status: 'Pending' | 'Partially Paid' | 'Paid';
+  created_at?: any;
+  deleted_at?: any;
+  isDemo?: boolean;
+}
+
+export interface LoanRepayment {
+  id: string;
+  userId: string;
+  loanId: string;
+  repaymentAmount: number;
+  repaymentDate: string;
+  note?: string;
+  created_at?: any;
+  deleted_at?: any;
+  isDemo?: boolean;
+}

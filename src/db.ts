@@ -90,6 +90,34 @@ db.exec(`
     FOREIGN KEY (categoryId) REFERENCES categories(id),
     UNIQUE(userId, categoryId, period)
   );
+
+  CREATE TABLE IF NOT EXISTS loans (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    userId INTEGER NOT NULL,
+    borrowerName TEXT NOT NULL,
+    mobileNumber TEXT,
+    amount REAL NOT NULL,
+    givenDate TEXT NOT NULL,
+    expectedReturnDate TEXT NOT NULL,
+    notes TEXT,
+    status TEXT CHECK(status IN ('Pending', 'Partially Paid', 'Paid')) DEFAULT 'Pending',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    deleted_at DATETIME,
+    FOREIGN KEY (userId) REFERENCES users(id)
+  );
+
+  CREATE TABLE IF NOT EXISTS loan_repayments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    userId INTEGER NOT NULL,
+    loanId INTEGER NOT NULL,
+    repaymentAmount REAL NOT NULL,
+    repaymentDate TEXT NOT NULL,
+    note TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    deleted_at DATETIME,
+    FOREIGN KEY (userId) REFERENCES users(id),
+    FOREIGN KEY (loanId) REFERENCES loans(id)
+  );
 `);
 
 // Migrations: Add userEmail to user_activity if it doesn't exist

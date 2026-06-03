@@ -444,6 +444,113 @@ async function startServer() {
     }
   });
 
+  // --- Loans & Debt Tracker ---
+  app.get("/api/loans", authenticateToken, (req: any, res) => {
+    try {
+      const loans = db.prepare("SELECT * FROM loans WHERE userId = ? AND deleted_at IS NULL ORDER BY givenDate DESC").all(req.user.id);
+      res.json(loans);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/loans", authenticateToken, (req: any, res) => {
+    const { borrowerName, mobileNumber, amount, givenDate, expectedReturnDate, notes, status } = req.body;
+    try {
+      const stmt = db.prepare("INSERT INTO loans (userId, borrowerName, mobileNumber, amount, givenDate, expectedReturnDate, notes, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+      const result = stmt.run(req.user.id, borrowerName, mobileNumber || null, amount, givenDate, expectedReturnDate, notes || null, status || 'Pending');
+      logActivity(req.user.id, req.user.email, 'ADD_LOAN', `Lent ${amount} to ${borrowerName}`);
+      res.status(201).json({ id: result.lastInsertRowid });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.put("/api/loans/:id", authenticateToken, (req: any, res) => {
+    const { borrowerName, mobileNumber, amount, givenDate, expectedReturnDate, notes, status } = req.body;
+    try {
+      const stmt = db.prepare("UPDATE loans SET borrowerName = ?, mobileNumber = ?, amount = ?, givenDate = ?, expectedReturnDate = ?, notes = ?, status = ? WHERE id = ? AND userId = ? AND deleted_at IS NULL");
+      stmt.run(borrowerName, mobileNumber || null, amount, givenDate, expectedReturnDate, notes || null, status, req.params.id, req.user.id);
+      logActivity(req.user.id, req.user.email, 'UPDATE_LOAN', `Updated loan #${req.params.id}`);
+      res.json({ message: "Loan updated successfully" });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/loans/:id", authenticateToken, (req: any, res) => {
+    try {
+      db.prepare("UPDATE loans SET deleted_at = CURRENT_TIMESTAMP WHERE id = ? AND userId = ?").run(req.params.id, req.user.id);
+      logActivity(req.user.id, req.user.email, 'DELETE_LOAN', `Deleted loan #${req.params.id}`);
+      res.json({ message: "Loan deleted" });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/repayments", authenticateToken, (req: any, res) => {
+    try {
+      const repayments = db.prepare("SELECT * FROM loan_repayments WHERE userId = ? AND deleted_at IS NULL ORDER BY repaymentDate DESC").all(req.user.id);
+      res.json(repayments);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/repayments", authenticateToken, (req: any, res) => {
+    const { loanId, repaymentAmount, repaymentDate, note } = req.body;
+    try {
+      const stmt = db.prepare("INSERT INTO loan_repayments (userId, loanId, repaymentAmount, repaymentDate, note) VALUES (?, ?, ?, ?, ?)");
+      const result = stmt.run(req.user.id, loanId, repaymentAmount, repaymentDate, note || null);
+      
+      // Update Loan remaining and check status
+      const loan = db.prepare("SELECT amount, borrowerName FROM loans WHERE id = ? AND userId = ?").get(loanId, req.user.id) as any;
+      if (loan) {
+        const totalPaid = (db.prepare("SELECT SUM(repaymentAmount) as total FROM loan_repayments WHERE loanId = ? AND deleted_at IS NULL").get(loanId) as any).total || 0;
+        let newStatus = 'Pending';
+        if (totalPaid >= loan.amount) {
+          newStatus = 'Paid';
+        } else if (totalPaid > 0) {
+          newStatus = 'Partially Paid';
+        }
+        db.prepare("UPDATE loans SET status = ? WHERE id = ?").run(newStatus, loanId);
+      }
+
+      logActivity(req.user.id, req.user.email, 'ADD_REPAYMENT', `Received ${repaymentAmount} for loan #${loanId}`);
+      res.status(201).json({ id: result.lastInsertRowid });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.delete("/api/repayments/:id", authenticateToken, (req: any, res) => {
+    try {
+      const repayment = db.prepare("SELECT loanId, repaymentAmount FROM loan_repayments WHERE id = ? AND userId = ?").get(req.params.id, req.user.id) as any;
+      
+      db.prepare("UPDATE loan_repayments SET deleted_at = CURRENT_TIMESTAMP WHERE id = ? AND userId = ?").run(req.params.id, req.user.id);
+
+      if (repayment) {
+        const loanId = repayment.loanId;
+        const loan = db.prepare("SELECT amount FROM loans WHERE id = ? AND userId = ?").get(loanId, req.user.id) as any;
+        if (loan) {
+          const totalPaid = (db.prepare("SELECT SUM(repaymentAmount) as total FROM loan_repayments WHERE loanId = ? AND deleted_at IS NULL").get(loanId) as any).total || 0;
+          let newStatus = 'Pending';
+          if (totalPaid >= loan.amount) {
+            newStatus = 'Paid';
+          } else if (totalPaid > 0) {
+            newStatus = 'Partially Paid';
+          }
+          db.prepare("UPDATE loans SET status = ? WHERE id = ?").run(newStatus, loanId);
+        }
+      }
+
+      logActivity(req.user.id, req.user.email, 'DELETE_REPAYMENT', `Deleted repayment #${req.params.id}`);
+      res.json({ message: "Repayment deleted" });
+    } catch (error: any) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
   // Export
   app.get("/api/user/export-json", authenticateToken, (req: any, res) => {
     try {
