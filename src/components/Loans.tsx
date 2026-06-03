@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { Loan, LoanRepayment } from '../types';
+import { Loan, LoanRepayment, Borrower } from '../types';
 import { formatCurrency } from '../utils/i18n';
+import BorrowerDropdown from './BorrowerDropdown';
 import { 
   Plus, 
   Trash2, 
@@ -59,6 +60,7 @@ export default function Loans() {
 
   // Form States
   const [loanForm, setLoanForm] = useState({
+    borrowerId: '',
     borrowerName: '',
     mobileNumber: '',
     amount: '',
@@ -177,12 +179,13 @@ export default function Loans() {
 
     const payload = {
       userId: user.id.toString(),
+      ...(loanForm.borrowerId ? { borrowerId: loanForm.borrowerId } : {}),
       borrowerName: loanForm.borrowerName,
-      mobileNumber: loanForm.mobileNumber || undefined,
+      ...(loanForm.mobileNumber ? { mobileNumber: loanForm.mobileNumber } : {}),
       amount: parsedAmount,
       givenDate: loanForm.givenDate,
       expectedReturnDate: loanForm.expectedReturnDate,
-      notes: loanForm.notes || undefined,
+      ...(loanForm.notes ? { notes: loanForm.notes } : {}),
       status: loanForm.status
     };
 
@@ -233,7 +236,7 @@ export default function Loans() {
       loanId: selectedLoanId,
       repaymentAmount: parsedAmount,
       repaymentDate: repaymentForm.repaymentDate,
-      note: repaymentForm.note || undefined
+      ...(repaymentForm.note ? { note: repaymentForm.note } : {}),
     };
 
     try {
@@ -297,6 +300,7 @@ export default function Loans() {
 
   const resetLoanForm = () => {
     setLoanForm({
+      borrowerId: '',
       borrowerName: '',
       mobileNumber: '',
       amount: '',
@@ -319,6 +323,7 @@ export default function Loans() {
   const triggerEditLoan = (loan: Loan) => {
     setEditingLoan(loan);
     setLoanForm({
+      borrowerId: loan.borrowerId || '',
       borrowerName: loan.borrowerName,
       mobileNumber: loan.mobileNumber || '',
       amount: loan.amount.toString(),
@@ -871,25 +876,27 @@ export default function Loans() {
               <form onSubmit={handleAddOrEditLoan} className="space-y-4 text-sm">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="space-y-1">
-                    <label className="text-zinc-400 text-xs font-semibold uppercase tracking-wider">Borrower Name *</label>
-                    <input
-                      type="text"
-                      required
-                      value={loanForm.borrowerName}
-                      onChange={(e) => setLoanForm({ ...loanForm, borrowerName: e.target.value })}
-                      placeholder="e.g. John Doe"
-                      className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700/60 rounded-xl px-4 py-2"
+                    <label className="text-zinc-400 text-xs font-semibold uppercase tracking-wider">Borrower *</label>
+                    <BorrowerDropdown 
+                      value={loanForm.borrowerId}
+                      onChange={(id, b) => setLoanForm({ 
+                        ...loanForm, 
+                        borrowerId: id,
+                        borrowerName: b.fullName,
+                        mobileNumber: b.mobileNumber || ''
+                      })}
                     />
                   </div>
 
                   <div className="space-y-1">
-                    <label className="text-zinc-400 text-xs font-semibold uppercase tracking-wider">Mobile Number (Optional)</label>
+                    <label className="text-zinc-400 text-xs font-semibold uppercase tracking-wider">Mobile Number</label>
                     <input
                       type="text"
+                      readOnly={!!loanForm.borrowerId}
                       value={loanForm.mobileNumber}
                       onChange={(e) => setLoanForm({ ...loanForm, mobileNumber: e.target.value })}
                       placeholder="e.g. +12345678"
-                      className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700/60 rounded-xl px-4 py-2"
+                      className={`w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700/60 rounded-xl px-4 py-2 ${!!loanForm.borrowerId ? 'text-zinc-500' : ''}`}
                     />
                   </div>
                 </div>

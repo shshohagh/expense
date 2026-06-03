@@ -263,6 +263,8 @@ export default function Quotations() {
       credit: 0,
       runningBalance: 0
     });
+    // Record that this has been successfully logged to ledger in Quotation metadata
+    await updateQuotation(q.id, { loggedToLedger: true });
   };
 
   const handleUpdateStatus = async (q: Quotation, nextStatus: Quotation['status']) => {
@@ -323,12 +325,29 @@ export default function Quotations() {
   };
 
   // WhatsApp reminder
-  const sendWhatsAppQuotation = (q: Quotation) => {
+  const sendWhatsAppQuotation = async (q: Quotation) => {
     const matchedClient = clients.find(c => c.id === q.clientId);
     const phoneNumber = matchedClient?.whatsAppNumber || matchedClient?.mobileNumber || '';
     const rawNumber = phoneNumber.replace(/[^0-9]/g, '');
 
-    const message = `Hello ${q.clientName},\n\nYour quotation #${q.quotationNumber} is ready.\n\nQuotation Amount: ৳${q.totalAmount}\n\nPlease review and confirm.\n\nThank you.`;
+    // Original quotation view link
+    const originalLink = `${window.location.origin}/?q=${q.id}`;
+    let shortLink = originalLink;
+
+    try {
+      // Fetch shortened url from TinyURL free public plain text API
+      const response = await fetch(`https://tinyurl.com/api-create.php?url=${encodeURIComponent(originalLink)}`);
+      if (response.ok) {
+        const text = await response.text();
+        if (text && text.startsWith('http')) {
+          shortLink = text;
+        }
+      }
+    } catch (err) {
+      console.warn('TinyURL shortening failed, falling back to original link:', err);
+    }
+
+    const message = `Hello ${q.clientName},\n\nYour quotation #${q.quotationNumber} is ready.\n\nQuotation Amount: ৳${q.totalAmount}\n\nPlease review and confirm:\n${shortLink}\n\nThank you.`;
     const url = `https://api.whatsapp.com/send?phone=${rawNumber}&text=${encodeURIComponent(message)}`;
     window.open(url, '_blank');
   };
@@ -393,6 +412,37 @@ export default function Quotations() {
           </button>
         </div>
       </div>
+
+      {/* Awaiting Ledger Log Banner */}
+      {quotations.some(q => q.status === 'Accepted' && !q.loggedToLedger) && (
+        <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-250 dark:border-amber-800/60 p-4 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded-xl shrink-0">
+              <AlertTriangle size={20} />
+            </div>
+            <div>
+              <p className="font-bold text-sm text-amber-905 dark:text-amber-400">Ledger Entry Required</p>
+              <p className="text-xs text-amber-700 dark:text-amber-500 mt-0.5">
+                Some quotations have been accepted by clients (e.g. via direct links), but their project charge hasn't been logged to the Client Ledger yet.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={async () => {
+              const pendingLogs = quotations.filter(q => q.status === 'Accepted' && !q.loggedToLedger);
+              if (window.confirm(`Log Project Charges for all ${pendingLogs.length} newly accepted quotations now?`)) {
+                for (const q of pendingLogs) {
+                  await logAcceptedToLedger(q);
+                }
+                alert('Project charges logged successfully!');
+              }
+            }}
+            className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-extrabold uppercase tracking-widest rounded-xl transition-all cursor-pointer shadow-sm self-start sm:self-auto shrink-0"
+          >
+            Auto-Log All ({quotations.filter(q => q.status === 'Accepted' && !q.loggedToLedger).length})
+          </button>
+        </div>
+      )}
 
       {/* Grid Dashboard Widgets */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -627,19 +677,26 @@ export default function Quotations() {
                         {renderCurrency(q.totalAmount)}
                       </td>
                       <td className="px-6 py-4.5">
-                        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-extrabold tracking-wider uppercase ${
-                          q.status === 'Accepted'
-                            ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/20 dark:text-emerald-400'
-                            : q.status === 'Sent'
-                            ? 'bg-blue-50 text-blue-700 dark:bg-blue-950/20 dark:text-blue-400'
-                            : q.status === 'Draft'
-                            ? 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-350'
-                            : q.status === 'Expired'
-                            ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/20 dark:text-amber-400'
-                            : 'bg-rose-50 text-rose-700 dark:bg-rose-950/20 dark:text-rose-450'
-                        }`}>
-                          {q.status}
-                        </span>
+                        <div className="flex flex-col items-start gap-1">
+                          <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-extrabold tracking-wider uppercase ${
+                            q.status === 'Accepted'
+                              ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/20 dark:text-emerald-400'
+                              : q.status === 'Sent'
+                              ? 'bg-blue-50 text-blue-700 dark:bg-blue-950/20 dark:text-blue-400'
+                              : q.status === 'Draft'
+                              ? 'bg-zinc-100 text-zinc-650 dark:bg-zinc-800 dark:text-zinc-350'
+                              : q.status === 'Expired'
+                              ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/20 dark:text-amber-400'
+                              : 'bg-rose-50 text-rose-700 dark:bg-rose-950/20 dark:text-rose-450'
+                          }`}>
+                            {q.status}
+                          </span>
+                          {q.status === 'Accepted' && !q.loggedToLedger && (
+                            <span className="text-[9px] font-black uppercase tracking-wider text-amber-600 bg-amber-50 dark:bg-amber-950/20 px-1.5 py-0.5 rounded shadow-sm">
+                              Unlogged Ledger
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-6 py-4.5">
                         <div className="flex items-center justify-center gap-1.5">
@@ -685,7 +742,17 @@ export default function Quotations() {
                         </div>
                       </td>
                       <td className="px-6 py-4.5 text-right">
-                        <div className="flex justify-end gap-1.5">
+                        <div className="flex justify-end items-center gap-1.5">
+                          {q.status === 'Accepted' && !q.loggedToLedger && (
+                            <button
+                              onClick={() => logAcceptedToLedger(q)}
+                              className="px-2.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-[10px] font-extrabold uppercase tracking-widest text-white rounded-lg transition-all shadow-sm cursor-pointer"
+                              title="Log Project Charge to Client Ledger"
+                            >
+                              Log Ledger
+                            </button>
+                          )}
+
                           {/* Quick selection status */}
                           <select
                             value={q.status}

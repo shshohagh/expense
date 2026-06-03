@@ -15,6 +15,8 @@ import Settings from './components/Settings';
 import Loans from './components/Loans';
 import ClientReceivables from './components/ClientReceivables';
 import Quotations from './components/Quotations';
+import BorrowerManagement from './components/BorrowerManagement';
+import PublicQuotationView from './components/PublicQuotationView';
 import { Transaction } from './types';
 import { subscribeToTransactions, getTransactions, processRecurringTransactions } from './services/firestoreService';
 import { t, formatCurrency } from './utils/i18n';
@@ -42,12 +44,21 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
-type View = 'dashboard' | 'transactions' | 'loans' | 'client_receivables' | 'quotations' | 'admin' | 'profile' | 'categories' | 'recurring' | 'activity' | 'reports' | 'ledger' | 'monthly_cash_flow' | 'annual_breakdown' | 'budgets' | 'settings';
+type View = 'dashboard' | 'transactions' | 'loans' | 'borrowers' | 'client_receivables' | 'quotations' | 'admin' | 'profile' | 'categories' | 'recurring' | 'activity' | 'reports' | 'ledger' | 'monthly_cash_flow' | 'annual_breakdown' | 'budgets' | 'settings';
 
 export default function App() {
   const { isAuthenticated, isLoading, user, logout } = useAuth();
+  const [publicQuotationId, setPublicQuotationId] = useState<string | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [currentView, setCurrentView] = useState<View>('dashboard');
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const qId = params.get('q');
+    if (qId) {
+      setPublicQuotationId(qId);
+    }
+  }, []);
   const [openMenus, setOpenMenus] = useState<Set<string>>(new Set(['reports']));
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -119,6 +130,16 @@ export default function App() {
     }
   }, [isAuthenticated, user?.id]);
 
+  if (publicQuotationId) {
+    return (
+      <PublicQuotationView 
+        quotationId={publicQuotationId} 
+        theme={theme} 
+        toggleTheme={toggleTheme} 
+      />
+    );
+  }
+
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-zinc-50 dark:bg-black">
@@ -136,6 +157,7 @@ export default function App() {
     { id: 'transactions', label: t('transactions', lang), icon: Receipt },
     { id: 'client_receivables', label: 'Client Receivables', icon: Users },
     { id: 'quotations', label: 'Quotations', icon: FileText },
+    { id: 'borrowers', label: 'Borrowers', icon: Users },
     { id: 'loans', label: 'Loans', icon: Coins },
     { id: 'budgets', label: t('budgets', lang), icon: Target },
     { 
@@ -380,6 +402,7 @@ export default function App() {
               {currentView === 'transactions' && <Transactions />}
               {currentView === 'client_receivables' && <ClientReceivables />}
               {currentView === 'quotations' && <Quotations />}
+              {currentView === 'borrowers' && <BorrowerManagement />}
               {currentView === 'loans' && <Loans />}
               {currentView === 'recurring' && <RecurringTransactions />}
               {currentView === 'ledger' && <Ledger transactions={transactions} currency={currency} lang={lang} />}

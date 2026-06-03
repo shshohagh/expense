@@ -1,5 +1,24 @@
 {
   "entities": {
+    "Borrower": {
+      "title": "Borrower",
+      "description": "Borrower personal and contact info",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string" },
+        "fullName": { "type": "string" },
+        "mobileNumber": { "type": "string" },
+        "whatsAppNumber": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "address": { "type": "string" },
+        "companyName": { "type": "string" },
+        "notes": { "type": "string" },
+        "status": { "type": "string", "enum": ["Active", "Inactive"] },
+        "created_at": { "type": "string", "format": "date-time" },
+        "updated_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "fullName", "status"]
+    },
     "User": {
       "title": "User",
       "description": "User profile and settings",
@@ -250,6 +269,10 @@
     }
   },
   "firestore": {
+    "/borrowers/{borrowerId}": {
+      "schema": "Borrower",
+      "description": "Borrower master data"
+    },
     "/users/{userId}": {
       "schema": "User",
       "description": "User profile data"

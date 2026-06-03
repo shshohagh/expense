@@ -53,9 +53,25 @@ export interface Budget {
   isDemo?: boolean;
 }
 
+export interface Borrower {
+  id: string;
+  ownerId: string;
+  fullName: string;
+  mobileNumber?: string;
+  whatsAppNumber?: string;
+  email?: string;
+  address?: string;
+  companyName?: string;
+  notes?: string;
+  status: 'Active' | 'Inactive';
+  created_at?: any;
+  updated_at?: any;
+}
+
 export interface Loan {
   id: string;
   userId: string;
+  borrowerId?: string; // Optional for backward compatibility with existing records
   borrowerName: string;
   mobileNumber?: string;
   amount: number;

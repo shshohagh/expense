@@ -16,9 +16,58 @@ import {
   writeBatch
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
-import { Transaction, Category, Budget, Loan, LoanRepayment, Client, ClientLedger, Project, Subscription, Receivable, PaymentCollection, Quotation, QuotationItem } from '../types';
+import { Transaction, Category, Budget, Loan, LoanRepayment, Client, ClientLedger, Project, Subscription, Receivable, PaymentCollection, Quotation, QuotationItem, Borrower } from '../types';
 
-// Helper to handle Firestore errors
+
+// --- Borrowers Management ---
+export const subscribeToBorrowers = (ownerId: string, callback: (borrowers: Borrower[]) => void) => {
+  const q = query(
+    collection(db, 'borrowers'),
+    where('ownerId', '==', ownerId)
+  );
+
+  return onSnapshot(q, (snapshot) => {
+    const borrowers = snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    })) as Borrower[];
+    borrowers.sort((a, b) => a.fullName.localeCompare(b.fullName));
+    callback(borrowers);
+  }, (error) => handleFirestoreError(error, 'LIST', 'borrowers'));
+};
+
+export const addBorrower = async (borrower: Omit<Borrower, 'id' | 'created_at' | 'updated_at'>) => {
+  try {
+    const docRef = await addDoc(collection(db, 'borrowers'), {
+      ...borrower,
+      created_at: serverTimestamp(),
+      updated_at: serverTimestamp()
+    });
+    return docRef.id;
+  } catch (error) {
+    handleFirestoreError(error, 'CREATE', 'borrowers');
+  }
+};
+
+export const updateBorrower = async (id: string, data: Partial<Borrower>) => {
+  try {
+    await updateDoc(doc(db, 'borrowers', id), {
+      ...data,
+      updated_at: serverTimestamp(),
+    });
+  } catch (error) {
+    handleFirestoreError(error, 'UPDATE', `borrowers/${id}`);
+  }
+};
+
+export const deleteBorrower = async (id: string) => {
+  try {
+    await deleteDoc(doc(db, 'borrowers', id));
+  } catch (error) {
+    handleFirestoreError(error, 'DELETE', `borrowers/${id}`);
+  }
+};
+
 const handleFirestoreError = (error: any, operation: string, path: string) => {
   const errInfo = {
     error: error.message,

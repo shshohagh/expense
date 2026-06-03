@@ -153,13 +153,15 @@ service cloud.firestore {
     }
 
     function isValidLoan(data) {
-      return data.keys().hasOverlapping(['userId', 'borrowerName', 'amount', 'givenDate', 'expectedReturnDate', 'status']) &&
-             data.userId == request.auth.uid &&
+      return data.userId == request.auth.uid &&
              data.borrowerName is string && data.borrowerName.size() > 0 && data.borrowerName.size() < 100 &&
              data.amount is number &&
              data.givenDate is string &&
              data.expectedReturnDate is string &&
-             data.status in ['Pending', 'Partially Paid', 'Paid'];
+             data.status in ['Pending', 'Partially Paid', 'Paid'] &&
+             (data.borrowerId is string || !('borrowerId' in data)) &&
+             (data.mobileNumber is string || !('mobileNumber' in data)) &&
+             (data.notes is string || !('notes' in data));
     }
 
     function isValidRepayment(data) {
@@ -208,6 +210,12 @@ service cloud.firestore {
              data.clientId is string &&
              data.amount is number &&
              data.paymentMethod in ["Cash", "Bank Transfer", "Mobile Banking", "Check", "SaaS Gateway", "Other"];
+    }
+
+    function isValidBorrower(data) {
+      return data.ownerId == request.auth.uid &&
+             data.fullName is string && data.fullName.size() > 0 &&
+             data.status in ["Active", "Inactive"];
     }
 
     function isValidQuotation(data) {
@@ -332,15 +340,22 @@ service cloud.firestore {
       allow delete: if isApproved() && (isDocOwner() || isAdmin());
     }
 
+    match /borrowers/{borrowerId} {
+      allow read: if isAuthenticated() && (resource == null || resource.data.ownerId == request.auth.uid) || isAdmin();
+      allow create: if isApproved() && isValidBorrower(request.resource.data);
+      allow update: if isApproved() && isValidBorrower(request.resource.data) && ((isAuthenticated() && resource.data.ownerId == request.auth.uid) || isAdmin());
+      allow delete: if isApproved() && ((isAuthenticated() && resource.data.ownerId == request.auth.uid) || isAdmin());
+    }
+
     match /quotations/{quotationId} {
-      allow read: if (isAuthenticated() && resource.data.ownerId == request.auth.uid) || isAdmin();
+      allow read: if isAuthenticated() && (resource == null || resource.data.ownerId == request.auth.uid) || isAdmin();
       allow create: if isApproved() && isValidQuotation(request.resource.data);
       allow update: if isApproved() && isValidQuotation(request.resource.data) && ((isAuthenticated() && resource.data.ownerId == request.auth.uid) || isAdmin());
       allow delete: if isApproved() && ((isAuthenticated() && resource.data.ownerId == request.auth.uid) || isAdmin());
     }
 
     match /quotation_items/{itemId} {
-      allow read: if (isAuthenticated() && resource.data.ownerId == request.auth.uid) || isAdmin();
+      allow read: if isAuthenticated() && (resource == null || resource.data.ownerId == request.auth.uid) || isAdmin();
       allow create: if isApproved() && isValidQuotationItem(request.resource.data);
       allow update: if isApproved() && isValidQuotationItem(request.resource.data) && ((isAuthenticated() && resource.data.ownerId == request.auth.uid) || isAdmin());
       allow delete: if isApproved() && ((isAuthenticated() && resource.data.ownerId == request.auth.uid) || isAdmin());
