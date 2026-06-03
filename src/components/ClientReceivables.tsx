@@ -22,9 +22,13 @@ import {
   deleteReceivable,
   subscribeToPayments,
   addPayment,
-  deletePayment
+  deletePayment,
+  subscribeToProducts,
+  addProduct,
+  updateProduct,
+  deleteProduct
 } from '../services/firestoreService';
-import { Client, ClientLedger, Project, Subscription, Receivable, PaymentCollection } from '../types';
+import { Client, ClientLedger, Project, Subscription, Receivable, PaymentCollection, Product } from '../types';
 import {
   Users,
   Briefcase,
@@ -33,6 +37,7 @@ import {
   DollarSign,
   Plus,
   Search,
+  Package,
   Filter,
   Calendar,
   Send,
@@ -50,12 +55,17 @@ import {
   X,
   FileCheck,
   CheckCircle2,
-  AlertTriangle
+  AlertTriangle,
+  Repeat,
+  BarChart3
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency } from '../utils/i18n';
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, Legend
+} from 'recharts';
 
-type Tab = 'dashboard' | 'clients' | 'projects' | 'subscriptions' | 'receivables' | 'payments';
+type Tab = 'dashboard' | 'clients' | 'projects' | 'subscriptions' | 'receivables' | 'payments' | 'products' | 'reports';
 
 export default function ClientReceivables() {
   const { user } = useAuth();
@@ -71,6 +81,7 @@ export default function ClientReceivables() {
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [receivables, setReceivables] = useState<Receivable[]>([]);
   const [payments, setPayments] = useState<PaymentCollection[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
 
   // Search & filter states
   const [searchTerm, setSearchTerm] = useState('');
@@ -87,6 +98,61 @@ export default function ClientReceivables() {
   const [showReceivableModal, setShowReceivableModal] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showLedgerEntryModal, setShowLedgerEntryModal] = useState(false);
+
+  // Products Master UI and Form States
+  const [showProductModal, setShowProductModal] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [productForm, setProductForm] = useState({
+    name: '',
+    code: '',
+    category: '',
+    description: '',
+    monthlyPrice: 0,
+    yearlyPrice: 0,
+    pricingType: 'Fixed Price' as 'Fixed Price' | 'Per Branch' | 'Monthly Price' | 'Yearly Price',
+    status: 'Active' as Product['status']
+  });
+
+  const [productSearchTerm, setProductSearchTerm] = useState('');
+  const [productCategoryFilter, setProductCategoryFilter] = useState('ALL');
+  const [productStatusFilter, setProductStatusFilter] = useState('ALL');
+  const [productSortField, setProductSortField] = useState<'name' | 'code' | 'category' | 'monthlyPrice' | 'yearlyPrice'>('name');
+  const [productSortOrder, setProductSortOrder] = useState<'asc' | 'desc'>('asc');
+  const [productCurrentPage, setProductCurrentPage] = useState(1);
+  const productItemsPerPage = 8;
+
+  // --- Filtered and sorted products list ---
+  const filteredAndSortedProducts = products
+    .filter(p => {
+      const term = productSearchTerm.toLowerCase();
+      const matchesSearch = p.name.toLowerCase().includes(term) || (p.code || '').toLowerCase().includes(term);
+      const matchesStatus = productStatusFilter === 'ALL' || p.status === productStatusFilter;
+      const matchesCategory = productCategoryFilter === 'ALL' || p.category === productCategoryFilter;
+      return matchesSearch && matchesStatus && matchesCategory;
+    })
+    .sort((a, b) => {
+      let valA = a[productSortField] || '';
+      let valB = b[productSortField] || '';
+
+      if (typeof valA === 'number' && typeof valB === 'number') {
+        return productSortOrder === 'asc' ? valA - valB : valB - valA;
+      }
+
+      valA = valA.toString().toLowerCase();
+      valB = valB.toString().toLowerCase();
+
+      if (valA < valB) return productSortOrder === 'asc' ? -1 : 1;
+      if (valA > valB) return productSortOrder === 'asc' ? 1 : -1;
+      return 0;
+    });
+
+  // Pagination for products
+  const productTotalPages = Math.max(1, Math.ceil(filteredAndSortedProducts.length / productItemsPerPage));
+  const productStartIndex = (productCurrentPage - 1) * productItemsPerPage;
+  const productPaginatedList = filteredAndSortedProducts.slice(productStartIndex, productStartIndex + productItemsPerPage);
+
+  // Get unique categories list for product filter option
+  const productCategoriesList = Array.from(new Set(products.map(p => p.category).filter(Boolean))) as string[];
 
   // Form input states
   const [clientForm, setClientForm] = useState({
@@ -112,14 +178,120 @@ export default function ClientReceivables() {
 
   const [subscriptionForm, setSubscriptionForm] = useState({
     clientId: '',
+    productId: '',
     productName: '',
+    productCategory: '',
     planName: '',
+    billingCycle: 'Monthly' as 'Monthly' | 'Quarterly' | 'Half-Yearly' | 'Yearly',
+    subscriptionFee: 0,
     monthlyFee: 0,
-    startDate: '',
+    yearlyFee: 0,
+    branchCount: 1,
+    startDate: new Date().toISOString().split('T')[0],
     renewalDate: '',
     status: 'Active' as Subscription['status'],
     notes: ''
   });
+
+  // Flag to know we are quick-adding from subscription setup
+  const [quickAddCallback, setQuickAddCallback] = useState<boolean>(false);
+
+  // Helper calculation for product billing cycles
+  const calculateSubscriptionUpdates = (
+    selectedProd: Product | null | undefined,
+    cycle: 'Monthly' | 'Quarterly' | 'Half-Yearly' | 'Yearly',
+    startDateStr: string,
+    branchCountValue: number = 1
+  ) => {
+    if (!selectedProd) return { fee: 0, monthlyFee: 0, yearlyFee: 0, renewal: '' };
+
+    const baseMonthly = Number(selectedProd.monthlyPrice) || 0;
+    const baseYearly = Number(selectedProd.yearlyPrice) || 0;
+    const pricingType = selectedProd.pricingType || 'Fixed Price';
+    const branches = Math.max(1, Number(branchCountValue) || 1);
+
+    // Calculate Monthly & Yearly values
+    let calculatedMonthlyFee = 0;
+    let calculatedYearlyFee = 0;
+
+    if (pricingType === 'Per Branch') {
+      calculatedMonthlyFee = baseMonthly * branches;
+      calculatedYearlyFee = (baseYearly || (baseMonthly * 12)) * branches;
+    } else if (pricingType === 'Fixed Price' || pricingType === 'Monthly Price') {
+      calculatedMonthlyFee = baseMonthly;
+      calculatedYearlyFee = baseYearly || (baseMonthly * 12);
+    } else if (pricingType === 'Yearly Price') {
+      calculatedYearlyFee = baseYearly || (baseMonthly * 12);
+      calculatedMonthlyFee = calculatedYearlyFee / 12;
+    }
+
+    // Calculate subscriptionFee for the selected billing cycle
+    let fee = 0;
+    if (cycle === 'Monthly') {
+      fee = calculatedMonthlyFee;
+    } else if (cycle === 'Quarterly') {
+      fee = calculatedMonthlyFee * 3;
+    } else if (cycle === 'Half-Yearly') {
+      fee = calculatedMonthlyFee * 6;
+    } else if (cycle === 'Yearly') {
+      fee = calculatedYearlyFee;
+    }
+
+    let renewal = '';
+    if (startDateStr) {
+      const d = new Date(startDateStr);
+      if (!isNaN(d.getTime())) {
+        let months = 1;
+        if (cycle === 'Quarterly') months = 3;
+        else if (cycle === 'Half-Yearly') months = 6;
+        else if (cycle === 'Yearly') months = 12;
+
+        d.setMonth(d.getMonth() + months);
+        renewal = d.toISOString().split('T')[0];
+      }
+    }
+
+    return { 
+      fee, 
+      monthlyFee: calculatedMonthlyFee, 
+      yearlyFee: calculatedYearlyFee, 
+      renewal 
+    };
+  };
+
+  // Synchronise subscription fee and next renewal date when product, billing cycle, or start date changes
+  useEffect(() => {
+    if (!subscriptionForm.productId) return;
+    const selectedProd = products.find(p => p.id === subscriptionForm.productId);
+    if (!selectedProd) return;
+
+    const { fee, monthlyFee, yearlyFee, renewal } = calculateSubscriptionUpdates(
+      selectedProd,
+      subscriptionForm.billingCycle,
+      subscriptionForm.startDate,
+      subscriptionForm.branchCount
+    );
+
+    setSubscriptionForm(prev => {
+      if (
+        prev.subscriptionFee === fee && 
+        prev.monthlyFee === monthlyFee && 
+        prev.yearlyFee === yearlyFee && 
+        prev.renewalDate === renewal
+      ) return prev;
+      return {
+        ...prev,
+        subscriptionFee: fee,
+        monthlyFee: monthlyFee,
+        yearlyFee: yearlyFee,
+        renewalDate: renewal
+      };
+    });
+  }, [subscriptionForm.productId, subscriptionForm.billingCycle, subscriptionForm.startDate, subscriptionForm.branchCount, products]);
+
+  // Product Search Dropdown States
+  const [prodSearchVal, setProdSearchVal] = useState('');
+  const [isProdDropdownOpen, setIsProdDropdownOpen] = useState(false);
 
   const [receivableForm, setReceivableForm] = useState({
     clientId: '',
@@ -158,6 +330,7 @@ export default function ClientReceivables() {
     const unsubSubscriptions = subscribeToSubscriptions(userId, setSubscriptions);
     const unsubReceivables = subscribeToReceivables(userId, setReceivables);
     const unsubPayments = subscribeToPayments(userId, setPayments);
+    const unsubProducts = subscribeToProducts(userId, setProducts);
 
     return () => {
       unsubClients();
@@ -166,6 +339,7 @@ export default function ClientReceivables() {
       unsubSubscriptions();
       unsubReceivables();
       unsubPayments();
+      unsubProducts();
     };
   }, [userId]);
 
@@ -198,6 +372,8 @@ export default function ClientReceivables() {
     e.preventDefault();
     if (!clientForm.name.trim()) return;
 
+    const initialDebt = Number(clientForm.balance) || 0;
+
     const payload = {
       userId,
       name: clientForm.name,
@@ -207,22 +383,22 @@ export default function ClientReceivables() {
       email: clientForm.email || '',
       address: clientForm.address || '',
       notes: clientForm.notes || '',
-      balance: Number(clientForm.balance) || 0
+      balance: 0 // Client starts in Firestore with 0 balance, then Opening Balance ledger transaction updates it. This avoids double counting.
     };
 
     const newId = await addClient(payload);
-    if (newId && payload.balance > 0) {
-      // Record initial balance adjustment in client ledger
+    if (newId && initialDebt > 0) {
+      // Record initial balance adjustment as an 'Opening Balance' type
       await addLedgerEntry({
         userId,
         clientId: newId,
         clientName: payload.name,
         date: new Date().toISOString().split('T')[0],
-        type: 'Adjustment',
+        type: 'Opening Balance',
         description: 'Opening Outstanding Balance Contribution',
-        debit: payload.balance,
+        debit: initialDebt,
         credit: 0,
-        runningBalance: payload.balance
+        runningBalance: initialDebt
       });
     }
 
@@ -288,9 +464,97 @@ export default function ClientReceivables() {
     });
   };
 
+  // --- Products Master Management Handlers ---
+  const handleSaveProduct = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!productForm.name.trim()) return;
+
+    const payload = {
+      ownerId: userId,
+      name: productForm.name.trim(),
+      code: productForm.code.trim() || undefined,
+      category: productForm.category.trim() || 'Software Plan',
+      description: productForm.description.trim() || '',
+      monthlyPrice: Number(productForm.monthlyPrice) || 0,
+      yearlyPrice: Number(productForm.yearlyPrice) || 0,
+      pricingType: productForm.pricingType || 'Fixed Price',
+      status: productForm.status
+    };
+
+    try {
+      if (editingProduct) {
+        await updateProduct(editingProduct.id, payload);
+      } else {
+        const newId = await addProduct(payload);
+        if (newId && quickAddCallback) {
+          // If we are quick adding from subscription setup form, select it immediately
+          const { fee, monthlyFee, yearlyFee, renewal } = calculateSubscriptionUpdates(
+            { id: newId, ...payload } as Product,
+            subscriptionForm.billingCycle,
+            subscriptionForm.startDate,
+            subscriptionForm.branchCount
+          );
+
+          setSubscriptionForm(prev => ({
+            ...prev,
+            productId: newId,
+            productName: payload.name,
+            productCategory: payload.category,
+            monthlyFee: monthlyFee,
+            subscriptionFee: fee,
+            yearlyFee: yearlyFee,
+            renewalDate: renewal
+          }));
+        }
+      }
+
+      setShowProductModal(false);
+      setEditingProduct(null);
+      setQuickAddCallback(false);
+      setProductForm({
+        name: '',
+        code: '',
+        category: '',
+        description: '',
+        monthlyPrice: 0,
+        yearlyPrice: 0,
+        pricingType: 'Fixed Price',
+        status: 'Active'
+      });
+    } catch (err) {
+      console.error("Error saving product: ", err);
+    }
+  };
+
+  const handleEditProductClick = (prod: Product) => {
+    setEditingProduct(prod);
+    setProductForm({
+      name: prod.name || '',
+      code: prod.code || '',
+      category: prod.category || '',
+      description: prod.description || '',
+      monthlyPrice: prod.monthlyPrice || 0,
+      yearlyPrice: prod.yearlyPrice || 0,
+      pricingType: prod.pricingType || 'Fixed Price',
+      status: prod.status || 'Active'
+    });
+    setQuickAddCallback(false);
+    setShowProductModal(true);
+  };
+
+  const toggleProdSort = (field: 'name' | 'code' | 'category' | 'monthlyPrice' | 'yearlyPrice') => {
+    if (productSortField === field) {
+      setProductSortOrder(productSortOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+      setProductSortField(field);
+      setProductSortOrder('asc');
+    }
+    setProductCurrentPage(1);
+  };
+
   const handleCreateSubscription = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!subscriptionForm.clientId || !subscriptionForm.productName.trim() || subscriptionForm.monthlyFee <= 0) return;
+    if (!subscriptionForm.clientId || !subscriptionForm.productName.trim() || subscriptionForm.subscriptionFee <= 0) return;
 
     const matchedClient = clients.find(c => c.id === subscriptionForm.clientId);
     if (!matchedClient) return;
@@ -300,26 +564,98 @@ export default function ClientReceivables() {
       clientId: subscriptionForm.clientId,
       clientName: matchedClient.name,
       productName: subscriptionForm.productName,
-      planName: subscriptionForm.planName || 'Monthly Standard',
+      planName: subscriptionForm.planName || `${subscriptionForm.billingCycle} Contract`,
       monthlyFee: Number(subscriptionForm.monthlyFee),
       startDate: subscriptionForm.startDate,
       renewalDate: subscriptionForm.renewalDate,
       status: subscriptionForm.status,
-      notes: subscriptionForm.notes || ''
+      notes: subscriptionForm.notes || '',
+
+      // Upgraded schema fields
+      productId: subscriptionForm.productId,
+      billingCycle: subscriptionForm.billingCycle,
+      subscriptionFee: Number(subscriptionForm.subscriptionFee),
+      productCategory: subscriptionForm.productCategory,
+      branchCount: Number(subscriptionForm.branchCount) || 1,
+      yearlyFee: Number(subscriptionForm.yearlyFee) || 0
     };
 
     await addSubscription(payload);
     setShowSubscriptionModal(false);
     setSubscriptionForm({
       clientId: '',
+      productId: '',
       productName: '',
+      productCategory: '',
       planName: '',
+      billingCycle: 'Monthly',
+      subscriptionFee: 0,
       monthlyFee: 0,
-      startDate: '',
+      yearlyFee: 0,
+      branchCount: 1,
+      startDate: new Date().toISOString().split('T')[0],
       renewalDate: '',
       status: 'Active',
       notes: ''
     });
+  };
+
+  const handleRenewSubscription = async (sub: Subscription) => {
+    try {
+      const branches = sub.branchCount || 1;
+      const cycle = sub.billingCycle || 'Monthly';
+      const currentRenewalStr = sub.renewalDate || new Date().toISOString().split('T')[0];
+
+      // Calculate next renewal date
+      const d = new Date(currentRenewalStr);
+      let months = 1;
+      if (cycle === 'Quarterly') months = 3;
+      else if (cycle === 'Half-Yearly') months = 6;
+      else if (cycle === 'Yearly') months = 12;
+
+      d.setMonth(d.getMonth() + months);
+      const nextRenewalStr = d.toISOString().split('T')[0];
+
+      const branchText = branches > 0 ? ` (${branches} Branch${branches > 1 ? 'es' : ''})` : '';
+      const cycleText = ` - ${cycle} Renewal`;
+      const description = `Subscription Charge: ${sub.productName}${branchText}${cycleText}`;
+      const chargeAmount = sub.subscriptionFee !== undefined ? sub.subscriptionFee : (sub.monthlyFee * months);
+
+      // 1. Create client ledger entry
+      await addLedgerEntry({
+        userId,
+        clientId: sub.clientId,
+        date: currentRenewalStr,
+        type: 'Subscription Charge',
+        description,
+        debit: chargeAmount,
+        credit: 0,
+        runningBalance: 0
+      });
+
+      // 2. Create receivable invoice
+      await addReceivable({
+        userId,
+        clientId: sub.clientId,
+        clientName: sub.clientName,
+        amount: chargeAmount,
+        dueDate: currentRenewalStr, // due on cycle start/renewal date
+        description: `Subscription Renewal Fee: ${sub.productName}${branchText}`,
+        status: 'Pending',
+        amountPaid: 0
+      });
+
+      // 3. Update subscription document
+      await updateSubscription(sub.id, {
+        startDate: currentRenewalStr,
+        renewalDate: nextRenewalStr
+      });
+
+      alert(`Successfully renewed contract for ${sub.clientName}! Advanced renewal till ${nextRenewalStr}, and logged ${chargeAmount} BDT invoice/ledger entry.`);
+    } catch (err) {
+      console.error("Error renewing subscription: ", err);
+      alert("Failed to renew contract.");
+    }
   };
 
   const handleCreateReceivable = async (e: React.FormEvent) => {
@@ -407,7 +743,7 @@ export default function ClientReceivables() {
     if (!matchedClient) return;
 
     // Evaluate debit vs credit based on ledger entry type structure
-    const isDebit = ['Project Charge', 'Subscription Charge', 'Adjustment'].includes(ledgerEntryForm.type);
+    const isDebit = ['Project Charge', 'Subscription Charge', 'Adjustment', 'Opening Balance'].includes(ledgerEntryForm.type);
     const debitVal = isDebit ? Number(ledgerEntryForm.amount) : 0;
     const creditVal = !isDebit ? Number(ledgerEntryForm.amount) : 0;
 
@@ -492,10 +828,12 @@ export default function ClientReceivables() {
         {[
           { tab: 'dashboard', name: 'Dashboard', icon: Users },
           { tab: 'clients', name: 'Active Clients', icon: Users },
+          { tab: 'products', name: 'Products', icon: Package },
           { tab: 'projects', name: 'Software Projects', icon: Briefcase },
           { tab: 'subscriptions', name: 'Contracts / Subscriptions', icon: CreditCard },
           { tab: 'receivables', name: 'Receivable Invoices', icon: TrendingUp },
-          { tab: 'payments', name: 'Payment Log', icon: DollarSign }
+          { tab: 'payments', name: 'Payment Log', icon: DollarSign },
+          { tab: 'reports', name: 'Revenue Reports', icon: BarChart3 }
         ].map(item => (
           <button
             key={item.tab}
@@ -886,11 +1224,11 @@ export default function ClientReceivables() {
                 <tr className="border-b border-zinc-100 dark:border-zinc-800 text-zinc-400 font-medium uppercase tracking-wider">
                   <th className="py-3 px-4">Product / Plan</th>
                   <th className="py-3 px-4">Client</th>
-                  <th className="py-3 px-4">Monthly Fee</th>
+                  <th className="py-3 px-4">Contract Fee / Billing</th>
                   <th className="py-3 px-4">Start Date</th>
                   <th className="py-3 px-4">Renewal Date</th>
                   <th className="py-3 px-4">Status</th>
-                  <th className="py-3 px-4 text-right">Delete</th>
+                  <th className="py-3 px-4 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -904,13 +1242,23 @@ export default function ClientReceivables() {
                       key={sub.id}
                       className="border-b border-zinc-50 dark:border-zinc-850 hover:bg-zinc-50/50 dark:hover:bg-zinc-800/10 transition-colors"
                     >
-                      <td className="py-3.5 px-4 font-semibold text-zinc-900 dark:text-zinc-50">
-                        {sub.productName}
+                      <td className="py-3.5 px-4 font-semibold text-zinc-900 dark:text-zinc-50 font-sans">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span>{sub.productName}</span>
+                          {sub.branchCount && sub.branchCount > 1 && (
+                            <span className="bg-blue-50 text-blue-600 dark:bg-blue-950/20 dark:text-blue-400 text-[9.5px] px-2 py-0.5 rounded-full font-bold">
+                              {sub.branchCount} Branches
+                            </span>
+                          )}
+                        </div>
                         <span className="block text-[10px] text-zinc-455 font-normal tracking-wide">{sub.planName}</span>
                       </td>
                       <td className="py-3.5 px-4 text-zinc-500 dark:text-zinc-400">{sub.clientName}</td>
                       <td className="py-3.5 px-4 font-mono font-bold text-zinc-700 dark:text-zinc-300">
-                        {renderMoney(sub.monthlyFee)}
+                        <div>{renderMoney(sub.subscriptionFee || sub.monthlyFee)}</div>
+                        <div className="text-[9px] font-sans text-zinc-400 font-normal select-none lowercase mt-0.5">
+                          / {sub.billingCycle || 'Monthly'}
+                        </div>
                       </td>
                       <td className="py-3.5 px-4 font-mono text-zinc-500">{sub.startDate}</td>
                       <td className="py-3.5 px-4 font-mono text-zinc-500">{sub.renewalDate}</td>
@@ -924,16 +1272,26 @@ export default function ClientReceivables() {
                         </span>
                       </td>
                       <td className="py-3.5 px-4 text-right">
-                        <button
-                          onClick={() => {
-                            if (confirm(`Delete the recurring contract ${sub.productName}?`)) {
-                              deleteSubscription(sub.id);
-                            }
-                          }}
-                          className="hover:text-rose-500 text-zinc-400 p-2"
-                        >
-                          <Trash2 size={13} />
-                        </button>
+                        <div className="flex items-center justify-end gap-2 text-xs">
+                          <button
+                            onClick={() => handleRenewSubscription(sub)}
+                            className="bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/30 dark:hover:bg-emerald-900/40 text-emerald-600 dark:text-emerald-400 font-bold px-2.5 py-1 rounded-xl text-[10px] flex items-center gap-1 cursor-pointer transition-colors"
+                            title="Renew Contract & Create Invoice / Ledger Entry"
+                          >
+                            <Repeat size={11} /> Renew
+                          </button>
+                          <button
+                            onClick={() => {
+                              if (confirm(`Delete the recurring contract ${sub.productName}?`)) {
+                                deleteSubscription(sub.id);
+                              }
+                            }}
+                            className="hover:text-rose-500 text-zinc-400 p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+                            title="Delete Contract"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -1126,7 +1484,561 @@ export default function ClientReceivables() {
         </div>
       )}
 
+      {/* TAB: PRODUCTS CATALOG (MASTER LIST) */}
+      {activeTab === 'products' && (
+        <div className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 p-5 shadow-sm space-y-4">
+          <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-3">
+            <div className="flex items-center gap-4">
+              <h2 className="text-xl font-bold">Products Master Catalog</h2>
+              <button
+                onClick={() => {
+                  setEditingProduct(null);
+                  setProductForm({
+                    name: '',
+                    code: '',
+                    category: '',
+                    description: '',
+                    monthlyPrice: 0,
+                    yearlyPrice: 0,
+                    pricingType: 'Fixed Price',
+                    status: 'Active'
+                  });
+                  setQuickAddCallback(false);
+                  setShowProductModal(true);
+                }}
+                className="bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-900 dark:text-zinc-100 font-bold text-xs rounded-xl px-3 py-1.5 flex items-center gap-1 cursor-pointer select-none"
+              >
+                <Plus size={14} /> New Product
+              </button>
+            </div>
+
+            {/* Filter controls */}
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Search bar */}
+              <div className="flex bg-zinc-100 dark:bg-zinc-800 rounded-xl px-3 py-1.5 items-center gap-2">
+                <Search className="text-zinc-400 shrink-0" size={16} />
+                <input
+                  type="text"
+                  placeholder="Search by name or code..."
+                  value={productSearchTerm}
+                  onChange={e => {
+                    setProductSearchTerm(e.target.value);
+                    setProductCurrentPage(1);
+                  }}
+                  className="bg-transparent border-0 ring-0 focus:outline-none text-xs w-52 text-zinc-900 dark:text-zinc-50"
+                />
+              </div>
+
+              {/* Status Filter */}
+              <div className="flex bg-zinc-100 dark:bg-zinc-800 rounded-xl px-3 py-1.5 items-center gap-1">
+                <Filter className="text-zinc-400 shrink-0" size={14} />
+                <select
+                  value={productStatusFilter}
+                  onChange={e => {
+                    setProductStatusFilter(e.target.value);
+                    setProductCurrentPage(1);
+                  }}
+                  className="bg-transparent border-none text-xs outline-none pr-2 cursor-pointer text-zinc-750 dark:text-zinc-300"
+                >
+                  <option value="ALL">All Statuses</option>
+                  <option value="Active">Active Only</option>
+                  <option value="Inactive">Inactive Only</option>
+                </select>
+              </div>
+
+              {/* Category Filter */}
+              <div className="flex bg-zinc-100 dark:bg-zinc-800 rounded-xl px-3 py-1.5 items-center gap-1">
+                <Filter className="text-zinc-400 shrink-0" size={14} />
+                <select
+                  value={productCategoryFilter}
+                  onChange={e => {
+                    setProductCategoryFilter(e.target.value);
+                    setProductCurrentPage(1);
+                  }}
+                  className="bg-transparent border-none text-xs outline-none pr-1.5 cursor-pointer text-zinc-750 dark:text-zinc-300"
+                >
+                  <option value="ALL">All Categories</option>
+                  {productCategoriesList.map(cat => (
+                    <option key={cat} value={cat}>{cat}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto no-scrollbar">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="border-b border-zinc-100 dark:border-zinc-800 text-zinc-400 font-medium uppercase tracking-wider">
+                  <th
+                    onClick={() => toggleProdSort('name')}
+                    className="py-3 px-4 cursor-pointer hover:text-zinc-900 dark:hover:text-zinc-100 select-none"
+                  >
+                    Product Name {productSortField === 'name' && (productSortOrder === 'asc' ? '↑' : '↓')}
+                  </th>
+                  <th
+                    onClick={() => toggleProdSort('code')}
+                    className="py-3 px-4 cursor-pointer hover:text-zinc-900 dark:hover:text-zinc-100 select-none"
+                  >
+                    SKU Code / ID {productSortField === 'code' && (productSortOrder === 'asc' ? '↑' : '↓')}
+                  </th>
+                  <th
+                    onClick={() => toggleProdSort('category')}
+                    className="py-3 px-4 cursor-pointer hover:text-zinc-900 dark:hover:text-zinc-100 select-none"
+                  >
+                    Category {productSortField === 'category' && (productSortOrder === 'asc' ? '↑' : '↓')}
+                  </th>
+                  <th className="py-3 px-4">Pricing Type</th>
+                  <th
+                    onClick={() => toggleProdSort('monthlyPrice')}
+                    className="py-3 px-4 cursor-pointer hover:text-zinc-900 dark:hover:text-zinc-100 select-none"
+                  >
+                    Monthly Price {productSortField === 'monthlyPrice' && (productSortOrder === 'asc' ? '↑' : '↓')}
+                  </th>
+                  <th
+                    onClick={() => toggleProdSort('yearlyPrice')}
+                    className="py-3 px-4 cursor-pointer hover:text-zinc-900 dark:hover:text-zinc-100 select-none"
+                  >
+                    Yearly Price {productSortField === 'yearlyPrice' && (productSortOrder === 'asc' ? '↑' : '↓')}
+                  </th>
+                  <th className="py-3 px-4">Status</th>
+                  <th className="py-3 px-4 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {productPaginatedList.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="py-8 text-center text-zinc-450">
+                      No master products matched your search or filter options.
+                    </td>
+                  </tr>
+                ) : (
+                  productPaginatedList.map(prod => (
+                    <tr
+                      key={prod.id}
+                      className="border-b border-zinc-50 dark:border-zinc-850 hover:bg-zinc-55/50 dark:hover:bg-zinc-800/10 transition-colors"
+                    >
+                      <td className="py-3.5 px-4 font-semibold text-zinc-900 dark:text-zinc-50">
+                        {prod.name}
+                        {prod.description && (
+                          <span className="block text-[10px] text-zinc-400 dark:text-zinc-500 font-normal mt-0.5 max-w-xs truncate">
+                            {prod.description}
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-3.5 px-4 font-mono font-bold text-zinc-500">{prod.code || '-'}</td>
+                      <td className="py-3.5 px-4 text-zinc-650 dark:text-zinc-450">
+                        <span className="bg-zinc-100 dark:bg-zinc-800/60 px-2 py-0.5 rounded text-[10px] font-semibold text-zinc-650 tracking-wide">
+                          {prod.category}
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-4 text-zinc-650 dark:text-zinc-450">
+                        <span className={`px-2 py-0.5 rounded text-[10.5px] font-bold tracking-wide ${
+                          prod.pricingType === 'Per Branch'
+                            ? 'bg-blue-50 text-blue-600 dark:bg-blue-950/25 dark:text-blue-400'
+                            : 'bg-zinc-10/50 text-zinc-600 dark:bg-zinc-800/50 dark:text-zinc-400'
+                        }`}>
+                          {prod.pricingType || 'Fixed Price'}
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-4 font-mono font-bold text-zinc-700 dark:text-zinc-350">
+                        {renderMoney(prod.monthlyPrice || 0)}
+                      </td>
+                      <td className="py-3.5 px-4 font-mono font-bold text-zinc-700 dark:text-zinc-350">
+                        {prod.yearlyPrice ? renderMoney(prod.yearlyPrice) : '-'}
+                      </td>
+                      <td className="py-3.5 px-4">
+                        <span className={`px-2.5 py-1 rounded-full text-[9px] font-bold uppercase tracking-wider ${
+                          prod.status === 'Active'
+                            ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400'
+                            : 'bg-zinc-100 text-zinc-650 dark:bg-zinc-800 dark:text-zinc-400'
+                        }`}>
+                          {prod.status}
+                        </span>
+                      </td>
+                      <td className="py-3.5 px-4 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            onClick={() => handleEditProductClick(prod)}
+                            className="hover:text-indigo-600 text-zinc-400 p-1.5 rounded-lg transition-colors cursor-pointer"
+                            title="Edit Product"
+                          >
+                            <Edit2 size={13} />
+                          </button>
+                          <button
+                            onClick={async () => {
+                              if (confirm(`Are you sure you want to delete product "${prod.name}"?`)) {
+                                await deleteProduct(prod.id);
+                              }
+                            }}
+                            className="hover:text-rose-500 text-zinc-400 p-1.5 rounded-lg transition-colors cursor-pointer"
+                            title="Delete Product"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Pagination controls */}
+          {filteredAndSortedProducts.length > productItemsPerPage && (
+            <div className="flex items-center justify-between border-t border-zinc-100 dark:border-zinc-800 pt-4 text-xs">
+              <span className="text-zinc-500">
+                Found {filteredAndSortedProducts.length} items (Page {productCurrentPage} of {productTotalPages})
+              </span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  disabled={productCurrentPage === 1}
+                  onClick={() => setProductCurrentPage(prev => Math.max(1, prev - 1))}
+                  className="px-3 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-805 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-350 disabled:opacity-50 select-none cursor-pointer"
+                >
+                  Previous
+                </button>
+                {Array.from({ length: productTotalPages }, (_, i) => i + 1).map(pageNo => (
+                  <button
+                    key={pageNo}
+                    onClick={() => setProductCurrentPage(pageNo)}
+                    className={`px-3 py-1.5 rounded-lg border text-xs font-semibold select-none cursor-pointer ${
+                      productCurrentPage === pageNo
+                        ? 'bg-zinc-950 border-zinc-950 text-white dark:bg-zinc-100 dark:border-zinc-100 dark:text-zinc-950 font-bold'
+                        : 'border-zinc-200 dark:border-zinc-800 hover:bg-zinc-55 dark:hover:bg-zinc-800 text-zinc-650'
+                    }`}
+                  >
+                    {pageNo}
+                  </button>
+                ))}
+                <button
+                  disabled={productCurrentPage === productTotalPages}
+                  onClick={() => setProductCurrentPage(prev => Math.min(productTotalPages, prev + 1))}
+                  className="px-3 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-805 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-350 disabled:opacity-50 select-none cursor-pointer"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* TAB: REVENUE REPORTS (FINANCIAL SaaS INSIGHTS) */}
+      {activeTab === 'reports' && (() => {
+        const activeContracts = subscriptions.filter(s => s.status === 'Active');
+        
+        // Sum MRR
+        const totalMRR = activeContracts.reduce((sum, s) => sum + (s.monthlyFee || 0), 0);
+        
+        // Sum ARR
+        const totalARR = activeContracts.reduce((sum, s) => sum + (s.yearlyFee || (s.monthlyFee * 12) || 0), 0);
+        
+        // Sum Branches managed
+        const managedBranches = activeContracts.reduce((sum, s) => sum + (s.branchCount || 1), 0);
+        
+        // Product Revenue Grouping
+        const productDataObj: { [prodName: string]: { name: string, mrr: number, arr: number, count: number } } = {};
+        activeContracts.forEach(s => {
+          const name = s.productName || 'Unmapped SaaS';
+          if (!productDataObj[name]) {
+            productDataObj[name] = { name, mrr: 0, arr: 0, count: 0 };
+          }
+          productDataObj[name].mrr += s.monthlyFee || 0;
+          productDataObj[name].arr += s.yearlyFee || (s.monthlyFee * 12) || 0;
+          productDataObj[name].count += 1;
+        });
+        const productDataArray = Object.values(productDataObj);
+
+        // Revenue by Branch Grouping
+        const branchContracts = activeContracts.filter(s => {
+          const pRef = products.find(prod => prod.id === s.productId);
+          return pRef?.pricingType === 'Per Branch';
+        });
+
+        // Sum branch mrr
+        const branchMRR = branchContracts.reduce((sum, s) => sum + (s.monthlyFee || 0), 0);
+
+        return (
+          <div className="space-y-6">
+            {/* Metric Bento Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-5 rounded-2xl shadow-sm">
+                <div className="text-zinc-400 font-medium uppercase tracking-wider text-[10px]">Monthly Subscription Revenue (MRR)</div>
+                <div className="font-mono text-2xl font-black text-emerald-600 dark:text-emerald-400 mt-1">{renderMoney(totalMRR)}</div>
+                <div className="text-[10px] text-zinc-500 mt-1">Cumulative SaaS recurring MRR</div>
+              </div>
+
+              <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-5 rounded-2xl shadow-sm">
+                <div className="text-zinc-400 font-medium uppercase tracking-wider text-[10px]">Annual Subscription Revenue (ARR)</div>
+                <div className="font-mono text-2xl font-black text-indigo-600 dark:text-indigo-400 mt-1">{renderMoney(totalARR)}</div>
+                <div className="text-[10px] text-zinc-500 mt-1">Projected annual ARR run rate</div>
+              </div>
+
+              <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-5 rounded-2xl shadow-sm">
+                <div className="text-zinc-400 font-medium uppercase tracking-wider text-[10px]">Branch SaaS Revenue</div>
+                <div className="font-mono text-2xl font-semibold text-zinc-850 dark:text-zinc-150 mt-1">{renderMoney(branchMRR)}</div>
+                <div className="text-[10px] text-zinc-500 mt-1">MRR from branch-based billings</div>
+              </div>
+
+              <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-5 rounded-2xl shadow-sm">
+                <div className="text-zinc-400 font-medium uppercase tracking-wider text-[10px]">Branches Under Administration</div>
+                <div className="text-2xl font-black text-zinc-850 dark:text-zinc-100 font-mono mt-1">{managedBranches}</div>
+                <div className="text-[10px] text-zinc-500 mt-1">Total active branches deployed</div>
+              </div>
+            </div>
+
+            {/* Product Revenues and charts */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Product MRR Breakdown chart */}
+              <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-805 p-5 rounded-2xl shadow-sm space-y-4">
+                <h3 className="text-sm font-bold text-zinc-800 dark:text-zinc-100 uppercase tracking-wide">MRR contribution by Product catalog</h3>
+                <div className="h-64 mt-2">
+                  {productDataArray.length === 0 ? (
+                    <div className="h-full flex items-center justify-center text-zinc-400 text-xs">No active contract data to lay out stats.</div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={productDataArray} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#E4E4E7" />
+                        <XAxis dataKey="name" stroke="#A1A1AA" fontSize={10} tickLine={false} />
+                        <YAxis stroke="#A1A1AA" fontSize={10} tickLine={false} />
+                        <Tooltip 
+                          contentStyle={{ background: '#18181B', borderRadius: '8px', border: 'none', color: '#FFF', fontSize: '11px' }}
+                          formatter={(value) => [`${value} BDT`, 'MRR Contribution']}
+                        />
+                        <Bar dataKey="mrr" fill="#4B5563" radius={[4, 4, 0, 0]}>
+                          {productDataArray.map((entry, idx) => (
+                            <Cell key={`cell-${idx}`} fill={idx % 2 === 0 ? '#10B981' : '#6366F1'} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  )}
+                </div>
+              </div>
+
+              {/* Product list table of details */}
+              <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-805 p-5 rounded-2xl shadow-sm space-y-3 flex flex-col justify-between">
+                <div>
+                  <h3 className="text-sm font-bold text-zinc-800 dark:text-zinc-100 uppercase tracking-wide mb-3">Product Revenue Breakdown Table</h3>
+                  <div className="overflow-y-auto max-h-56 no-scrollbar">
+                    <table className="w-full text-left text-xs text-zinc-500">
+                      <thead>
+                        <tr className="border-b border-zinc-100 dark:border-zinc-800 text-zinc-400 font-bold uppercase tracking-wider text-[10px]">
+                          <th className="pb-2">Product Name</th>
+                          <th className="pb-2 text-center">Active Contracts</th>
+                          <th className="pb-2 text-right">MRR Value</th>
+                          <th className="pb-2 text-right">ARR Run-rate</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-zinc-50 dark:divide-zinc-850">
+                        {productDataArray.map((row, index) => (
+                          <tr key={index} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-800/10 transition-colors">
+                            <td className="py-2.5 font-semibold text-zinc-800 dark:text-zinc-200">{row.name}</td>
+                            <td className="py-2.5 text-center font-mono font-bold text-zinc-700 dark:text-zinc-300">{row.count}</td>
+                            <td className="py-2.5 text-right font-mono font-black text-emerald-600 dark:text-emerald-400">{renderMoney(row.mrr)}</td>
+                            <td className="py-2.5 text-right font-mono font-medium text-zinc-650 dark:text-zinc-400">{renderMoney(row.arr)}</td>
+                          </tr>
+                        ))}
+                        {productDataArray.length === 0 && (
+                          <tr>
+                            <td colSpan={4} className="py-10 text-center text-zinc-450">No active products inside established subscription contracts.</td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Revenue by Branch block */}
+            <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-5 rounded-2xl shadow-sm space-y-4">
+              <div className="flex justify-between items-center">
+                <div>
+                  <h3 className="text-sm font-bold text-zinc-800 dark:text-zinc-100 uppercase tracking-wide">Revenue by Branch Contracts (Per-Branch SaaS model)</h3>
+                  <p className="text-[10px] text-zinc-455 font-normal mt-0.5">List of active contracts where pricing is calculated per physical or virtual branch location.</p>
+                </div>
+                <div className="bg-blue-50 text-blue-600 dark:bg-blue-950/20 dark:text-blue-400 px-3 py-1 text-xs font-bold rounded-xl font-mono">
+                  Active locations: {managedBranches - (activeContracts.length - branchContracts.length)} Branches
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="border-b border-zinc-100 dark:border-zinc-800 text-zinc-400 font-bold uppercase tracking-wider text-[10px]">
+                      <th className="pb-3 px-2">Client Company</th>
+                      <th className="pb-3 px-2">Product Name</th>
+                      <th className="pb-3 px-2 text-center">Branch Count</th>
+                      <th className="pb-3 px-2 text-right">Base unit Price</th>
+                      <th className="pb-3 px-2 text-right">Monthly Billings (MRR)</th>
+                      <th className="pb-3 px-2 text-right">Annual Run-rate</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-50 dark:divide-zinc-850">
+                    {branchContracts.map(sub => {
+                      const basePrice = products.find(p => p.id === sub.productId)?.monthlyPrice || 0;
+                      return (
+                        <tr key={sub.id} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-800/10 transition-colors">
+                          <td className="py-3 px-2 font-semibold text-zinc-900 dark:text-zinc-100">{sub.clientName}</td>
+                          <td className="py-3 px-2 font-medium text-zinc-650 dark:text-zinc-400">{sub.productName}</td>
+                          <td className="py-3 px-2 text-center">
+                            <span className="bg-blue-50 text-blue-600 dark:bg-blue-950/30 dark:text-blue-400 px-2.5 py-0.5 rounded-full font-black font-mono text-[10.5px]">
+                              {sub.branchCount || 1} Branches
+                            </span>
+                          </td>
+                          <td className="py-3 px-2 text-right font-mono text-zinc-500">{renderMoney(basePrice)} / unit</td>
+                          <td className="py-3 px-2 text-right font-mono font-black text-emerald-600 dark:text-emerald-400">{renderMoney(sub.monthlyFee)}</td>
+                          <td className="py-3 px-2 text-right font-mono font-semibold text-indigo-600 dark:text-indigo-400">{renderMoney(sub.yearlyFee || (sub.monthlyFee * 12))}</td>
+                        </tr>
+                      );
+                    })}
+                    {branchContracts.length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="py-10 text-center text-zinc-450">No clients are currently subscribed to a per-branch priced product.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* --- ALL INLINE POPUP DRAWER MODALS --- */}
+
+      {/* MODAL: ADD/EDIT PRODUCT */}
+      <AnimatePresence>
+        {showProductModal && (
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 p-6 w-full max-w-md shadow-2xl relative"
+            >
+              <button
+                onClick={() => {
+                  setShowProductModal(false);
+                  setEditingProduct(null);
+                  setQuickAddCallback(false);
+                }}
+                className="absolute right-4 top-4 p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg text-zinc-400 cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+              <h2 className="text-lg font-bold mb-4 flex items-center gap-2">
+                <Package size={18} /> {editingProduct ? 'Edit Master Product' : 'Add New Product'}
+              </h2>
+              <form onSubmit={handleSaveProduct} className="space-y-4 text-xs">
+                <div className="space-y-1">
+                  <label className="text-zinc-500 font-medium">Product Name *</label>
+                  <input
+                    type="text"
+                    required
+                    value={productForm.name}
+                    onChange={e => setProductForm({ ...productForm, name: e.target.value })}
+                    className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-3 py-2.5 outline-none text-zinc-900 dark:text-zinc-50"
+                    placeholder="e.g. POS Subscription Plan A"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-zinc-500 font-medium">Product Code / SKU (Optional)</label>
+                  <input
+                    type="text"
+                    value={productForm.code}
+                    onChange={e => setProductForm({ ...productForm, code: e.target.value })}
+                    className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-3 py-2.5 outline-none text-zinc-900 dark:text-zinc-50 font-mono"
+                    placeholder="e.g. POS-ADV-001"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-zinc-500 font-medium">Category</label>
+                  <input
+                    type="text"
+                    value={productForm.category}
+                    onChange={e => setProductForm({ ...productForm, category: e.target.value })}
+                    className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-3 py-2.5 outline-none text-zinc-900 dark:text-zinc-50"
+                    placeholder="e.g. Billing Software, Hardware, Consulting"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-zinc-500 font-medium">Pricing Type *</label>
+                  <select
+                    required
+                    value={productForm.pricingType || 'Fixed Price'}
+                    onChange={e => setProductForm({ ...productForm, pricingType: e.target.value as Product['pricingType'] })}
+                    className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-3 py-2.5 outline-none text-zinc-950 dark:text-zinc-50 font-semibold"
+                  >
+                    <option value="Fixed Price">Fixed Price (standard fixed rate)</option>
+                    <option value="Per Branch">Per Branch (billed per branch)</option>
+                    <option value="Monthly Price">Monthly Price</option>
+                    <option value="Yearly Price">Yearly Price</option>
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-zinc-500 font-medium">
+                    {productForm.pricingType === 'Per Branch' ? 'Monthly Price Per Branch *' : 'Monthly Price *'}
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    min="0"
+                    step="0.01"
+                    value={productForm.monthlyPrice}
+                    onChange={e => setProductForm({ ...productForm, monthlyPrice: Number(e.target.value) })}
+                    className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-3 py-2.5 outline-none text-zinc-900 dark:text-zinc-50 font-mono"
+                    placeholder="0.00"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-zinc-500 font-medium">
+                    {productForm.pricingType === 'Per Branch' ? 'Yearly Price Per Branch (Optional)' : 'Yearly Price (Optional)'}
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={productForm.yearlyPrice}
+                    onChange={e => setProductForm({ ...productForm, yearlyPrice: Number(e.target.value) })}
+                    className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-3 py-2.5 outline-none text-zinc-900 dark:text-zinc-50 font-mono"
+                    placeholder="0.00"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-zinc-500 font-medium">Description</label>
+                  <textarea
+                    value={productForm.description}
+                    onChange={e => setProductForm({ ...productForm, description: e.target.value })}
+                    className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-3 py-2.5 outline-none text-zinc-900 dark:text-zinc-50 h-16 resize-none"
+                    placeholder="Write product specifications..."
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-zinc-500 font-medium">Status</label>
+                  <select
+                    value={productForm.status}
+                    onChange={e => setProductForm({ ...productForm, status: e.target.value as Product['status'] })}
+                    className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-3 py-2.5 outline-none"
+                  >
+                    <option value="Active">Active</option>
+                    <option value="Inactive">Inactive</option>
+                  </select>
+                </div>
+                <button
+                  type="submit"
+                  className="w-full bg-zinc-950 dark:bg-zinc-50 dark:text-zinc-950 text-white font-bold py-2.5 rounded-xl tracking-wide select-none cursor-pointer hover:bg-zinc-900 dark:hover:bg-zinc-200 transition-colors"
+                >
+                  {editingProduct ? 'Save Changes' : 'Create Product Master'}
+                </button>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* MODAL: ADD CLIENT */}
       <AnimatePresence>
@@ -1371,36 +2283,180 @@ export default function ClientReceivables() {
                     ))}
                   </select>
                 </div>
-                <div className="space-y-1">
-                  <label className="text-zinc-500 font-medium">Product Name *</label>
-                  <input
-                    type="text"
-                    required
-                    value={subscriptionForm.productName}
-                    onChange={e => setSubscriptionForm({ ...subscriptionForm, productName: e.target.value })}
-                    className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-3 py-2.5 outline-none text-zinc-900 dark:text-zinc-50"
-                    placeholder="e.g. POS Billing SaaS, Cloud Server Hosting"
-                  />
+                <div className="space-y-1 relative">
+                  <label className="text-zinc-500 font-medium tracking-wide">Product / Plan Selection *</label>
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setIsProdDropdownOpen(!isProdDropdownOpen)}
+                      className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-3 py-2.5 outline-none text-zinc-900 dark:text-zinc-50 text-left flex justify-between items-center cursor-pointer font-medium"
+                    >
+                      <span>
+                        {subscriptionForm.productName
+                          ? `${subscriptionForm.productName} (${subscriptionForm.productCategory || 'SaaS'})`
+                          : '-- Choose From Products Master --'}
+                      </span>
+                      <span className="text-zinc-400 text-[10px]">▼</span>
+                    </button>
+
+                    {isProdDropdownOpen && (
+                      <div className="absolute left-0 right-0 mt-1.5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-2xl p-3 z-[60] max-h-72 overflow-y-auto no-scrollbar space-y-2">
+                        <div className="flex bg-zinc-100 dark:bg-zinc-800 rounded-lg px-2 py-1.5 items-center gap-1.5 ring-1 ring-zinc-200 dark:ring-zinc-700">
+                          <Search size={13} className="text-zinc-400" />
+                          <input
+                            type="text"
+                            placeholder="Find active product master..."
+                            value={prodSearchVal}
+                            onChange={e => setProdSearchVal(e.target.value)}
+                            onKeyDown={e => e.stopPropagation()}
+                            className="bg-transparent border-0 outline-none text-xs w-full text-zinc-900 dark:text-zinc-50"
+                          />
+                        </div>
+
+                        <div className="space-y-0.5 max-h-40 overflow-y-auto no-scrollbar">
+                          {products
+                            .filter(p => {
+                              if (p.status !== 'Active') return false;
+                              const keyword = prodSearchVal.toLowerCase();
+                              return p.name.toLowerCase().includes(keyword) || (p.code || '').toLowerCase().includes(keyword);
+                            })
+                            .map(p => (
+                              <button
+                                key={p.id}
+                                type="button"
+                                onClick={() => {
+                                  const { fee, renewal } = calculateSubscriptionUpdates(
+                                    p,
+                                    subscriptionForm.billingCycle,
+                                    subscriptionForm.startDate
+                                  );
+
+                                  setSubscriptionForm({
+                                    ...subscriptionForm,
+                                    productId: p.id,
+                                    productName: p.name,
+                                    productCategory: p.category || '',
+                                    planName: p.code || `${subscriptionForm.billingCycle} Contract`,
+                                    monthlyFee: p.monthlyPrice || 0,
+                                    subscriptionFee: fee,
+                                    renewalDate: renewal
+                                  });
+                                  setIsProdDropdownOpen(false);
+                                  setProdSearchVal('');
+                                }}
+                                className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800/80 transition-colors flex justify-between items-center cursor-pointer select-none"
+                              >
+                                <div>
+                                  <div className="font-semibold text-zinc-900 dark:text-zinc-50">{p.name}</div>
+                                  {p.code && <div className="text-[8px] text-zinc-400 font-mono">Code: {p.code}</div>}
+                                </div>
+                                <div className="text-right">
+                                  <div className="font-mono font-bold text-zinc-700 dark:text-zinc-350">{renderMoney(p.monthlyPrice || 0)}</div>
+                                  <div className="text-[7px] text-zinc-400 uppercase">/ mo</div>
+                                </div>
+                              </button>
+                            ))}
+
+                          {products.filter(p => {
+                            if (p.status !== 'Active') return false;
+                            const keyword = prodSearchVal.toLowerCase();
+                            return p.name.toLowerCase().includes(keyword) || (p.code || '').toLowerCase().includes(keyword);
+                          }).length === 0 && (
+                            <div className="text-center py-4 text-zinc-400 font-medium">
+                              No active products found
+                            </div>
+                          )}
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsProdDropdownOpen(false);
+                            setProductForm({
+                              name: prodSearchVal,
+                              code: '',
+                              category: 'Software SaaS',
+                              description: '',
+                              monthlyPrice: 0,
+                              yearlyPrice: 0,
+                              status: 'Active'
+                            });
+                            setQuickAddCallback(true);
+                            setShowProductModal(true);
+                          }}
+                          className="w-full text-left text-[11px] font-bold text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/20 px-3 py-2 rounded-lg border-t border-zinc-100 dark:border-zinc-800 flex items-center justify-center gap-1.5 cursor-pointer mt-1"
+                        >
+                          <Plus size={12} /> + Add New Product
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 </div>
+
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-zinc-500 font-medium">Billing Cycle *</label>
+                    <select
+                      required
+                      value={subscriptionForm.billingCycle}
+                      onChange={e => {
+                        const newCycle = e.target.value as 'Monthly' | 'Quarterly' | 'Half-Yearly' | 'Yearly';
+                        setSubscriptionForm(prev => ({
+                          ...prev,
+                          billingCycle: newCycle
+                        }));
+                      }}
+                      className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-3 py-2.5 outline-none font-semibold text-zinc-900 dark:text-zinc-50"
+                    >
+                      <option value="Monthly">Monthly</option>
+                      <option value="Quarterly">Quarterly</option>
+                      <option value="Half-Yearly">Half-Yearly</option>
+                      <option value="Yearly">Yearly</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-zinc-500 font-medium">Branches *</label>
+                    <input
+                      type="number"
+                      required
+                      min="1"
+                      step="1"
+                      value={subscriptionForm.branchCount || 1}
+                      onChange={e => {
+                        const count = Math.max(1, Number(e.target.value) || 1);
+                        setSubscriptionForm(prev => ({
+                          ...prev,
+                          branchCount: count
+                        }));
+                      }}
+                      className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-3 py-2.5 outline-none font-mono font-semibold"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-zinc-500 font-medium">Calculated Fee *</label>
+                    <input
+                      type="number"
+                      required
+                      min="0"
+                      step="0.01"
+                      value={subscriptionForm.subscriptionFee}
+                      onChange={e => setSubscriptionForm({ ...subscriptionForm, subscriptionFee: Number(e.target.value) })}
+                      className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-3 py-2.5 outline-none font-mono font-bold text-emerald-600 dark:text-emerald-400"
+                      placeholder="e.g. 59"
+                    />
+                  </div>
+                </div>
+
                 <div className="space-y-1">
-                  <label className="text-zinc-500 font-medium">Plan Name / Reference</label>
+                  <label className="text-zinc-500 font-medium">Plan Contract Code / Reference</label>
                   <input
                     type="text"
                     value={subscriptionForm.planName}
                     onChange={e => setSubscriptionForm({ ...subscriptionForm, planName: e.target.value })}
-                    className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-3 py-2.5 outline-none text-zinc-900"
-                    placeholder="e.g. Pro Monthly, Annual Premium Tier"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-zinc-500 font-medium">Recurring Fee Amount (Monthly) *</label>
-                  <input
-                    type="number"
-                    required
-                    value={subscriptionForm.monthlyFee}
-                    onChange={e => setSubscriptionForm({ ...subscriptionForm, monthlyFee: Number(e.target.value) })}
-                    className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-3 py-2.5 outline-none font-mono"
-                    placeholder="e.g. 59"
+                    className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-3 py-2.5 outline-none text-zinc-900 dark:text-zinc-50"
+                    placeholder="e.g. POS-Monthly, Tier-1-Enterprise"
                   />
                 </div>
                 <div className="grid grid-cols-2 gap-3">
@@ -1438,6 +2494,61 @@ export default function ClientReceivables() {
                     <option value="Past Due">Past Due</option>
                   </select>
                 </div>
+                
+                {/* LIVE CALCULATED PRICE PREVIEW */}
+                {subscriptionForm.productId && (
+                  <div className="bg-zinc-50 dark:bg-zinc-800/45 p-3.5 rounded-xl border border-zinc-150 dark:border-zinc-800 space-y-2">
+                    <div className="text-zinc-450 uppercase text-[9px] tracking-wider font-extrabold flex justify-between items-center">
+                      <span>Contract Pricing Summary</span>
+                      <span className="bg-emerald-50 text-emerald-600 dark:bg-emerald-950/30 dark:text-emerald-400 text-[8.5px] px-1.5 py-0.5 rounded uppercase font-bold">Live Calc</span>
+                    </div>
+                    <div className="flex justify-between text-[11px] text-zinc-500">
+                      <span>Selected Product:</span>
+                      <span className="font-semibold text-zinc-800 dark:text-zinc-200">{subscriptionForm.productName}</span>
+                    </div>
+                    {(() => {
+                      const selectedProd = products.find(p => p.id === subscriptionForm.productId);
+                      const pricingType = selectedProd?.pricingType || 'Fixed Price';
+                      const baseMonthly = Number(selectedProd?.monthlyPrice || 0);
+
+                      return (
+                        <div className="space-y-1.5 text-[11px]">
+                          <div className="flex justify-between text-zinc-500">
+                            <span>Pricing Rule:</span>
+                            <span className="font-bold text-zinc-700 dark:text-zinc-300">{pricingType}</span>
+                          </div>
+                          <div className="flex justify-between text-zinc-500">
+                            <span>Base Monthly Rate:</span>
+                            <span className="font-mono text-zinc-700 dark:text-zinc-300">{formatCurrency(baseMonthly)} / unit</span>
+                          </div>
+                          
+                          {pricingType === 'Per Branch' && (
+                            <div className="border-t border-dashed border-zinc-200 dark:border-zinc-800 pt-1.5 mt-1 font-mono text-zinc-500 flex justify-between">
+                              <span>Per-Branch Multiplier:</span>
+                              <span className="font-semibold text-zinc-700 dark:text-zinc-300">{formatCurrency(baseMonthly)} × {subscriptionForm.branchCount || 1} Branches</span>
+                            </div>
+                          )}
+
+                          <div className="flex justify-between border-t border-zinc-200 dark:border-zinc-750 pt-1.5 font-bold text-zinc-800 dark:text-zinc-200">
+                            <span>Live Monthly Fee:</span>
+                            <span className="font-mono text-emerald-600 dark:text-emerald-400">
+                              {formatCurrency(subscriptionForm.monthlyFee)}
+                            </span>
+                          </div>
+                          <div className="flex justify-between text-[10px] text-zinc-450 font-medium">
+                            <span>Live Yearly Fee:</span>
+                            <span className="font-mono">{formatCurrency(subscriptionForm.yearlyFee || (subscriptionForm.monthlyFee * 12))}</span>
+                          </div>
+                          <div className="flex justify-between font-extrabold border-t border-zinc-200 dark:border-zinc-750 pt-1.5 text-indigo-600 dark:text-indigo-400">
+                            <span>Current {subscriptionForm.billingCycle} Fee:</span>
+                            <span className="font-mono text-xs">{formatCurrency(subscriptionForm.subscriptionFee)}</span>
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+
                 <button
                   type="submit"
                   className="w-full bg-zinc-950 dark:bg-zinc-50 dark:text-zinc-950 text-white font-bold py-2.5 rounded-xl tracking-wide"
@@ -1835,6 +2946,7 @@ export default function ClientReceivables() {
                     className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-3 py-2.5 outline-none font-sans"
                   >
                     <option value="Adjustment">Adjustment (Increases Balance)</option>
+                    <option value="Opening Balance">Opening Balance (Increases Balance)</option>
                     <option value="Project Charge">Project Charge (Increases Balance)</option>
                     <option value="Subscription Charge">Subscription Charge (Increases Balance)</option>
                     <option value="Payment Received">Payment Received (Decreases Balance)</option>

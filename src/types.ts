@@ -117,7 +117,7 @@ export interface ClientLedger {
   clientId: string;
   clientName?: string;
   date: string;
-  type: 'Project Charge' | 'Subscription Charge' | 'Payment Received' | 'Adjustment' | 'Refund';
+  type: 'Project Charge' | 'Subscription Charge' | 'Payment Received' | 'Adjustment' | 'Refund' | 'Opening Balance';
   description: string;
   debit: number;
   credit: number;
@@ -142,6 +142,21 @@ export interface Project {
   deleted_at?: any;
 }
 
+export interface Product {
+  id: string;
+  ownerId: string;
+  name: string;
+  code?: string;
+  category?: string;
+  description?: string;
+  monthlyPrice?: number;
+  yearlyPrice?: number;
+  pricingType?: 'Fixed Price' | 'Per Branch' | 'Monthly Price' | 'Yearly Price';
+  status: 'Active' | 'Inactive';
+  created_at?: any;
+  deleted_at?: any;
+}
+
 export interface Subscription {
   id: string;
   userId: string;
@@ -156,6 +171,14 @@ export interface Subscription {
   notes?: string;
   created_at?: any;
   deleted_at?: any;
+
+  // Product Master specific fields
+  productId?: string;
+  billingCycle?: 'Monthly' | 'Quarterly' | 'Half-Yearly' | 'Yearly';
+  subscriptionFee?: number;
+  productCategory?: string;
+  branchCount?: number;
+  yearlyFee?: number;
 }
 
 export interface Receivable {
@@ -200,6 +223,7 @@ export interface Quotation {
   validUntilDate: string;
   projectName: string;
   description: string;
+  loggedToLedger?: boolean;
   createdAt: any;
   updatedAt: any;
 }

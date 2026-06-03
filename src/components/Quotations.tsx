@@ -398,9 +398,6 @@ export default function Quotations() {
           <h1 className="text-3xl font-extrabold tracking-tight font-sans text-zinc-900 dark:text-zinc-50">
             Quotation Management
           </h1>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
-            Build professional detailed quotations, design itemized breakdowns, share via WhatsApp, and instantly convert accepted offers into active Projects or receivable invoices.
-          </p>
         </div>
 
         <div>
@@ -408,7 +405,7 @@ export default function Quotations() {
             onClick={openCreateModal}
             className="flex items-center gap-2 bg-zinc-950 dark:bg-zinc-50 dark:text-zinc-950 text-white rounded-xl px-4 py-2.5 text-xs font-semibold hover:opacity-90 transition-all shadow-md cursor-pointer"
           >
-            <Plus size={16} /> New Quotation
+            <Plus size={16} /> New
           </button>
         </div>
       </div>

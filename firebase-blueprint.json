@@ -181,9 +181,15 @@
         "userId": { "type": "string" },
         "clientId": { "type": "string" },
         "clientName": { "type": "string" },
+        "productId": { "type": "string" },
         "productName": { "type": "string" },
+        "productCategory": { "type": "string" },
         "planName": { "type": "string" },
+        "billingCycle": { "type": "string", "enum": ["Monthly", "Quarterly", "Half-Yearly", "Yearly"] },
+        "branchCount": { "type": "number" },
+        "subscriptionFee": { "type": "number" },
         "monthlyFee": { "type": "number" },
+        "yearlyFee": { "type": "number" },
         "startDate": { "type": "string", "format": "date" },
         "renewalDate": { "type": "string", "format": "date" },
         "status": { "type": "string", "enum": ["Active", "Inactive", "Cancelled", "Past Due"] },
@@ -266,6 +272,23 @@
         "total": { "type": "number" }
       },
       "required": ["ownerId", "quotationId", "itemName", "quantity", "unitPrice", "total"]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Product master used for subscription setup",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string" },
+        "name": { "type": "string" },
+        "code": { "type": "string" },
+        "category": { "type": "string" },
+        "description": { "type": "string" },
+        "monthlyPrice": { "type": "number" },
+        "yearlyPrice": { "type": "number" },
+        "pricingType": { "type": "string", "enum": ["Fixed Price", "Per Branch", "Monthly Price", "Yearly Price"] },
+        "status": { "type": "string", "enum": ["Active", "Inactive"] }
+      },
+      "required": ["ownerId", "name", "status"]
     }
   },
   "firestore": {
@@ -328,6 +351,10 @@
     "/quotation_items/{itemId}": {
       "schema": "QuotationItem",
       "description": "Line items of quotations"
+    },
+    "/products/{productId}": {
+      "schema": "Product",
+      "description": "Product master data"
     }
   }
 }

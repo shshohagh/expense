@@ -16,7 +16,7 @@ import {
   writeBatch
 } from 'firebase/firestore';
 import { db, auth } from '../firebase';
-import { Transaction, Category, Budget, Loan, LoanRepayment, Client, ClientLedger, Project, Subscription, Receivable, PaymentCollection, Quotation, QuotationItem, Borrower } from '../types';
+import { Transaction, Category, Budget, Loan, LoanRepayment, Client, ClientLedger, Project, Subscription, Receivable, PaymentCollection, Quotation, QuotationItem, Borrower, Product } from '../types';
 
 
 // --- Borrowers Management ---
@@ -866,6 +866,19 @@ export const subscribeToClientLedgers = (userId: string, callback: (ledgers: Cli
 
 export const addLedgerEntry = async (entry: Omit<ClientLedger, 'id' | 'created_at'>) => {
   try {
+    if (entry.type === 'Opening Balance') {
+      const q = query(
+        collection(db, 'client_ledgers'),
+        where('clientId', '==', entry.clientId),
+        where('type', '==', 'Opening Balance'),
+        where('deleted_at', '==', null)
+      );
+      const snap = await getDocs(q);
+      if (!snap.empty) {
+        throw new Error('Opening Balance entry already exists for this client.');
+      }
+    }
+
     const clientRef = doc(db, 'clients', entry.clientId);
     const clientSnap = await getDoc(clientRef);
     let currentBalance = 0;
@@ -1018,14 +1031,19 @@ export const addSubscription = async (sub: Omit<Subscription, 'id' | 'created_at
       deleted_at: null
     });
 
+    const branchText = sub.branchCount && sub.branchCount > 0 ? ` (${sub.branchCount} Branch${sub.branchCount > 1 ? 'es' : ''})` : '';
+    const cycleText = sub.billingCycle ? ` - ${sub.billingCycle}` : '';
+    const description = `Subscription Charge: ${sub.productName}${branchText}${cycleText}`;
+    const debitAmount = sub.subscriptionFee !== undefined ? sub.subscriptionFee : sub.monthlyFee;
+
     // Create entry in client_ledger
     await addLedgerEntry({
       userId: sub.userId,
       clientId: sub.clientId,
       date: sub.startDate,
       type: 'Subscription Charge',
-      description: `Subscription Charge: ${sub.productName} (${sub.planName})`,
-      debit: sub.monthlyFee,
+      description,
+      debit: debitAmount,
       credit: 0,
       runningBalance: 0
     });
@@ -1035,9 +1053,9 @@ export const addSubscription = async (sub: Omit<Subscription, 'id' | 'created_at
       userId: sub.userId,
       clientId: sub.clientId,
       clientName: sub.clientName,
-      amount: sub.monthlyFee,
+      amount: debitAmount,
       dueDate: sub.renewalDate,
-      description: `Subscription Renewal Fee: ${sub.productName}`,
+      description: `Subscription Renewal Fee: ${sub.productName}${branchText}`,
       status: 'Pending',
       amountPaid: 0
     });
@@ -1063,6 +1081,55 @@ export const deleteSubscription = async (id: string) => {
     });
   } catch (error) {
     handleFirestoreError(error, 'DELETE', `subscriptions/${id}`);
+  }
+};
+
+// --- Products Master Management ---
+export const subscribeToProducts = (ownerId: string, callback: (products: Product[]) => void) => {
+  const q = query(
+    collection(db, 'products'),
+    where('ownerId', '==', ownerId),
+    where('deleted_at', '==', null)
+  );
+
+  return onSnapshot(q, (snapshot) => {
+    const products = snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    })) as Product[];
+    products.sort((a, b) => a.name.localeCompare(b.name));
+    callback(products);
+  }, (error) => handleFirestoreError(error, 'LIST', 'products'));
+};
+
+export const addProduct = async (product: Omit<Product, 'id' | 'created_at'>) => {
+  try {
+    const docRef = await addDoc(collection(db, 'products'), {
+      ...product,
+      created_at: serverTimestamp(),
+      deleted_at: null
+    });
+    return docRef.id;
+  } catch (error) {
+    handleFirestoreError(error, 'CREATE', 'products');
+  }
+};
+
+export const updateProduct = async (id: string, data: Partial<Product>) => {
+  try {
+    await updateDoc(doc(db, 'products', id), data);
+  } catch (error) {
+    handleFirestoreError(error, 'UPDATE', `products/${id}`);
+  }
+};
+
+export const deleteProduct = async (id: string) => {
+  try {
+    await updateDoc(doc(db, 'products', id), {
+      deleted_at: serverTimestamp()
+    });
+  } catch (error) {
+    handleFirestoreError(error, 'DELETE', `products/${id}`);
   }
 };
 

@@ -181,7 +181,7 @@ service cloud.firestore {
     function isValidClientLedger(data) {
       return data.userId == request.auth.uid &&
              data.clientId is string &&
-             data.type in ["Project Charge", "Subscription Charge", "Payment Received", "Adjustment", "Refund"];
+             data.type in ["Project Charge", "Subscription Charge", "Payment Received", "Adjustment", "Refund", "Opening Balance"];
     }
 
     function isValidProject(data) {
@@ -195,7 +195,25 @@ service cloud.firestore {
       return data.userId == request.auth.uid &&
              data.clientId is string &&
              data.productName is string &&
-             data.status in ["Active", "Inactive", "Cancelled", "Past Due"];
+             data.status in ["Active", "Inactive", "Cancelled", "Past Due"] &&
+             (data.productId is string || !('productId' in data)) &&
+             (data.billingCycle is string || !('billingCycle' in data)) &&
+             (data.subscriptionFee is number || !('subscriptionFee' in data)) &&
+             (data.productCategory is string || !('productCategory' in data)) &&
+             (data.branchCount is number || !('branchCount' in data)) &&
+             (data.yearlyFee is number || !('yearlyFee' in data));
+    }
+
+    function isValidProduct(data) {
+      return data.ownerId == request.auth.uid &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 200 &&
+             (data.code is string || !('code' in data)) &&
+             (data.category is string || !('category' in data)) &&
+             (data.description is string || !('description' in data)) &&
+             (data.monthlyPrice is number || !('monthlyPrice' in data)) &&
+             (data.yearlyPrice is number || !('yearlyPrice' in data)) &&
+             (data.pricingType in ["Fixed Price", "Per Branch", "Monthly Price", "Yearly Price"] || !('pricingType' in data)) &&
+             data.status in ["Active", "Inactive"];
     }
 
     function isValidReceivable(data) {
@@ -358,6 +376,13 @@ service cloud.firestore {
       allow read: if isAuthenticated() && (resource == null || resource.data.ownerId == request.auth.uid) || isAdmin();
       allow create: if isApproved() && isValidQuotationItem(request.resource.data);
       allow update: if isApproved() && isValidQuotationItem(request.resource.data) && ((isAuthenticated() && resource.data.ownerId == request.auth.uid) || isAdmin());
+      allow delete: if isApproved() && ((isAuthenticated() && resource.data.ownerId == request.auth.uid) || isAdmin());
+    }
+
+    match /products/{productId} {
+      allow read: if isAuthenticated() && (resource == null || resource.data.ownerId == request.auth.uid) || isAdmin();
+      allow create: if isApproved() && isValidProduct(request.resource.data);
+      allow update: if isApproved() && isValidProduct(request.resource.data) && ((isAuthenticated() && resource.data.ownerId == request.auth.uid) || isAdmin());
       allow delete: if isApproved() && ((isAuthenticated() && resource.data.ownerId == request.auth.uid) || isAdmin());
     }
   }
