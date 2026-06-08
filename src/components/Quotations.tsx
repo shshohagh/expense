@@ -30,7 +30,8 @@ import {
   X,
   RefreshCw,
   PlusCircle,
-  ArrowRight
+  ArrowRight,
+  Copy
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { formatCurrency } from '../utils/i18n';
@@ -49,6 +50,16 @@ export default function Quotations() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [quotations, setQuotations] = useState<Quotation[]>([]);
   const [allQuotationItems, setAllQuotationItems] = useState<QuotationItem[]>([]);
+
+  // Duplication & Toast states
+  const [toastMessage, setToastMessage] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+    setToastMessage({ message, type });
+    setTimeout(() => {
+      setToastMessage(null);
+    }, 4000);
+  };
 
   // UI flow and select/filter states
   const [isQuotationModalOpen, setIsQuotationModalOpen] = useState(false);
@@ -101,17 +112,20 @@ export default function Quotations() {
   // Keep a unique autoincrement counter for sequence prefix
   useEffect(() => {
     if (!editingQuotation && isQuotationModalOpen) {
-      const year = new Date().getFullYear();
-      const count = quotations.length + 1;
-      const autoNum = `QT-${year}-${String(count).padStart(3, '0')}`;
-      setQuotationNumber(autoNum);
+      if (!quotationNumber) {
+        const year = new Date().getFullYear();
+        const count = quotations.length + 1;
+        const autoNum = `QT-${year}-${String(count).padStart(3, '0')}`;
+        setQuotationNumber(autoNum);
+      }
     }
-  }, [isQuotationModalOpen, editingQuotation, quotations.length]);
+  }, [isQuotationModalOpen, editingQuotation, quotations.length, quotationNumber]);
 
   // Modal open handlers
   const openCreateModal = () => {
     setEditingQuotation(null);
     setClientId('');
+    setQuotationNumber('');
     setProjectName('');
     setDescription('');
     setQuotationDate(new Date().toISOString().split('T')[0]);
@@ -282,6 +296,44 @@ export default function Quotations() {
   const handleDelete = (id: string) => {
     setQuotationToDelete(id);
     setDeleteModalOpen(true);
+  };
+
+  const handleDuplicateClick = (q: Quotation) => {
+    setEditingQuotation(null);
+    setClientId(q.clientId);
+
+    // Generate a fresh unique quotation number sequence matching the standard format
+    const year = new Date().getFullYear();
+    const count = quotations.length + 1;
+    const autoNum = `QT-${year}-${String(count).padStart(3, '0')}`;
+    setQuotationNumber(autoNum);
+
+    setProjectName(`${q.projectName} (Copy)`);
+    setDescription(q.description || '');
+    setQuotationDate(new Date().toISOString().split('T')[0]);
+    setValidUntilDate(q.validUntilDate);
+    setStatus('Draft');
+
+    // Get line items matching this quotation ID from allQuotationItems
+    const matched = allQuotationItems.filter(item => item.quotationId === q.id);
+    if (matched.length > 0) {
+      setLineItems(matched.map(m => ({
+        itemName: m.itemName,
+        description: m.description || '',
+        quantity: m.quantity,
+        unitPrice: m.unitPrice,
+        discount: m.discount,
+        tax: m.tax,
+        total: m.total
+      })));
+    } else {
+      setLineItems([
+        { itemName: '', description: '', quantity: 1, unitPrice: 0, discount: 0, tax: 0, total: 0 }
+      ]);
+    }
+
+    setIsQuotationModalOpen(true);
+    showToast(`Draft duplicate of Quotation loaded with new Invoice No: #${autoNum}!`, 'success');
   };
 
   const handleDeleteConfirm = async () => {
@@ -786,6 +838,13 @@ export default function Quotations() {
                             title="Edit Quotation"
                           >
                             <Edit2 size={14} />
+                          </button>
+                          <button
+                            onClick={() => handleDuplicateClick(q)}
+                            className="p-2 text-zinc-500 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/20 rounded-lg"
+                            title="Duplicate"
+                          >
+                            <Copy size={14} />
                           </button>
                           <button
                             onClick={() => handleDelete(q.id)}
@@ -1320,6 +1379,29 @@ export default function Quotations() {
         }}
         isLoading={isDeleting}
       />
+
+
+
+      {/* Toast Notification Banner */}
+      <AnimatePresence>
+        {toastMessage && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.95 }}
+            className={`fixed bottom-6 right-6 z-[120] flex items-center gap-2.5 px-4.5 py-3 rounded-xl shadow-xl border ${
+              toastMessage.type === 'success'
+                ? 'bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-900/50 text-emerald-800 dark:text-emerald-400'
+                : 'bg-rose-50 dark:bg-rose-950/20 border-rose-200 dark:border-rose-900/50 text-rose-800 dark:text-rose-400'
+            }`}
+          >
+            <div className={`p-1 rounded-lg ${toastMessage.type === 'success' ? 'bg-emerald-100/80 dark:bg-emerald-950/40 text-emerald-600' : 'bg-rose-100/80 dark:bg-rose-950/40 text-rose-600'}`}>
+              <Copy size={14} />
+            </div>
+            <p className="text-xs font-bold font-sans tracking-tight">{toastMessage.message}</p>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

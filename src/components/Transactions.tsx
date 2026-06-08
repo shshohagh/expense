@@ -17,7 +17,13 @@ import {
   bulkDeleteTransactions
 } from '../services/firestoreService';
 
-export default function Transactions() {
+export default function Transactions({ 
+  shouldOpenNewTransaction, 
+  onOpenNewTransactionComplete 
+}: { 
+  shouldOpenNewTransaction?: boolean, 
+  onOpenNewTransactionComplete?: () => void 
+}) {
   const { user } = useAuth();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -31,7 +37,25 @@ export default function Transactions() {
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [showImporter, setShowImporter] = useState(false);
-  
+
+  useEffect(() => {
+    if (shouldOpenNewTransaction) {
+      setEditingId(null);
+      setFormData({
+        type: 'EXPENSE',
+        amount: '',
+        categoryId: '',
+        date: new Date().toISOString().split('T')[0],
+        description: '',
+        status: 'ACTIVE',
+      });
+      setShowModal(true);
+      if (onOpenNewTransactionComplete) {
+        onOpenNewTransactionComplete();
+      }
+    }
+  }, [shouldOpenNewTransaction, onOpenNewTransactionComplete]);
+
   const [dateFilter, setDateFilter] = useState<'today' | 'yesterday' | 'last7' | 'last30' | 'thisWeek' | 'thisMonth' | 'thisYear' | 'lifetime' | 'custom'>('lifetime');
   const [typeFilter, setTypeFilter] = useState<'ALL' | 'INCOME' | 'EXPENSE'>('ALL');
   const [categoryFilter, setCategoryFilter] = useState<string>('ALL');

@@ -1,5 +1,6 @@
 {
   "name": "Expense",
   "description": "A full-stack expense tracker with RBAC, admin approval, multi-tenant privacy, and Google Drive backup.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

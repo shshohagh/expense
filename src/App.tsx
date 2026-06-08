@@ -51,6 +51,7 @@ export default function App() {
   const [publicQuotationId, setPublicQuotationId] = useState<string | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [currentView, setCurrentView] = useState<View>('dashboard');
+  const [shouldOpenNewTransaction, setShouldOpenNewTransaction] = useState(false);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -59,7 +60,7 @@ export default function App() {
       setPublicQuotationId(qId);
     }
   }, []);
-  const [openMenus, setOpenMenus] = useState<Set<string>>(new Set(['reports']));
+  const [openMenus, setOpenMenus] = useState<Set<string>>(new Set());
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
@@ -74,6 +75,39 @@ export default function App() {
 
   const lang = user?.language || 'en';
   const currency = user?.currency || 'USD';
+
+  const navItems = React.useMemo(() => [
+    { id: 'dashboard', label: t('dashboard', lang), icon: LayoutDashboard },
+    { id: 'transactions', label: t('transactions', lang), icon: Receipt },
+    { id: 'client_receivables', label: 'Client Receivables', icon: Users },
+    { id: 'quotations', label: 'Quotations', icon: FileText },
+    { id: 'borrowers', label: 'Borrowers', icon: Users },
+    { id: 'loans', label: 'Loans', icon: Coins },
+    { id: 'budgets', label: t('budgets', lang), icon: Target },
+    { 
+      id: 'reports', 
+      label: t('reports', lang), 
+      icon: FileText, 
+      hasChildren: true 
+    },
+    { id: 'ledger', label: 'Ledger', icon: BookOpen, parentId: 'reports' },
+    { id: 'monthly_cash_flow', label: 'Monthly Cash Flow', icon: FileText, parentId: 'reports' },
+    { id: 'annual_breakdown', label: 'Annual Breakdown', icon: FileText, parentId: 'reports' },
+    { id: 'recurring', label: t('recurring', lang), icon: Repeat },
+    { id: 'activity', label: 'Activity', icon: History },
+    ...(user?.permissions?.includes('manage_categories') || user?.role === 'SUPER_ADMIN' ? [
+      { id: 'categories', label: t('categories', lang), icon: Tags }
+    ] : []),
+    ...(user?.permissions?.includes('view_admin_panel') || user?.role === 'SUPER_ADMIN' ? [
+      { id: 'admin', label: t('admin', lang), icon: Users }
+    ] : []),
+    { id: 'profile', label: t('profile', lang), icon: UserCircle },
+    { id: 'settings', label: 'Settings', icon: SettingsIcon },
+  ], [lang, user?.permissions, user?.role]);
+
+  const topLevelItems = React.useMemo(() => {
+    return navItems.filter((item: any) => !item.parentId);
+  }, [navItems]);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -130,6 +164,46 @@ export default function App() {
     }
   }, [isAuthenticated, user?.id]);
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ctrl+N for New Transaction
+      if ((e.ctrlKey || e.metaKey) && e.key === 'n') {
+        e.preventDefault();
+        setCurrentView('transactions');
+        setShouldOpenNewTransaction(true);
+      }
+      // Ctrl+K placeholder for Search
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        console.log('Search functionality not implemented');
+      }
+
+      // Alt + 1-9 shortcuts
+      if (e.altKey && !e.ctrlKey && !e.metaKey) {
+        const num = parseInt(e.key, 10);
+        if (num >= 1 && num <= 9) {
+          const targetIndex = num - 1;
+          const targetItem = topLevelItems[targetIndex];
+          if (targetItem) {
+            e.preventDefault();
+            if (targetItem.hasChildren) {
+              setOpenMenus(prev => {
+                const next = new Set(prev);
+                if (next.has(targetItem.id)) next.delete(targetItem.id);
+                else next.add(targetItem.id);
+                return next;
+              });
+            } else {
+              setCurrentView(targetItem.id as View);
+            }
+          }
+        }
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [topLevelItems]);
+
   if (publicQuotationId) {
     return (
       <PublicQuotationView 
@@ -151,35 +225,6 @@ export default function App() {
   if (!isAuthenticated) {
     return <Auth theme={theme} toggleTheme={toggleTheme} />;
   }
-
-  const navItems = [
-    { id: 'dashboard', label: t('dashboard', lang), icon: LayoutDashboard },
-    { id: 'transactions', label: t('transactions', lang), icon: Receipt },
-    { id: 'client_receivables', label: 'Client Receivables', icon: Users },
-    { id: 'quotations', label: 'Quotations', icon: FileText },
-    { id: 'borrowers', label: 'Borrowers', icon: Users },
-    { id: 'loans', label: 'Loans', icon: Coins },
-    { id: 'budgets', label: t('budgets', lang), icon: Target },
-    { 
-      id: 'reports', 
-      label: t('reports', lang), 
-      icon: FileText, 
-      hasChildren: true 
-    },
-    { id: 'ledger', label: 'Ledger', icon: BookOpen, parentId: 'reports' },
-    { id: 'monthly_cash_flow', label: 'Monthly Cash Flow', icon: FileText, parentId: 'reports' },
-    { id: 'annual_breakdown', label: 'Annual Breakdown', icon: FileText, parentId: 'reports' },
-    { id: 'recurring', label: t('recurring', lang), icon: Repeat },
-    { id: 'activity', label: 'Activity', icon: History },
-    ...(user?.permissions?.includes('manage_categories') || user?.role === 'SUPER_ADMIN' ? [
-      { id: 'categories', label: t('categories', lang), icon: Tags }
-    ] : []),
-    ...(user?.permissions?.includes('view_admin_panel') || user?.role === 'SUPER_ADMIN' ? [
-      { id: 'admin', label: t('admin', lang), icon: Users }
-    ] : []),
-    { id: 'profile', label: t('profile', lang), icon: UserCircle },
-    { id: 'settings', label: 'Settings', icon: SettingsIcon },
-  ];
 
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-black text-zinc-900 dark:text-zinc-100">
@@ -245,45 +290,58 @@ export default function App() {
         }`}
       >
         <nav className="flex-1 px-3 py-6 space-y-1 overflow-y-auto scrollbar-hide">
-              {navItems.filter((item: any) => !item.parentId || openMenus.has(item.parentId)).map((item: any) => (
-                <button
-                  key={item.id}
-                  onClick={() => {
-                    if (item.hasChildren) {
-                      const next = new Set(openMenus);
-                      if (next.has(item.id)) next.delete(item.id);
-                      else next.add(item.id);
-                      setOpenMenus(next);
-                    } else {
-                      setCurrentView(item.id as View);
-                    }
-                  }}
-                  title={isSidebarCollapsed ? item.label : ''}
-                  className={`w-full flex items-center justify-between px-3 py-3 rounded-xl text-sm font-medium transition-all group ${
-                    currentView === item.id 
-                      ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 shadow-lg shadow-zinc-900/10' 
-                      : 'text-muted-foreground hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-white'
-                  } ${isSidebarCollapsed ? 'justify-center' : ''} ${item.parentId ? 'ml-8' : ''}`}
-                >
-                  <div className="flex items-center gap-3">
-                    <item.icon size={20} className="shrink-0" />
-                    {!isSidebarCollapsed && (
-                      <motion.span
-                        initial={{ opacity: 0, x: -10 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        className="truncate"
-                      >
-                        {item.label}
-                      </motion.span>
+              {navItems.filter((item: any) => !item.parentId || openMenus.has(item.parentId)).map((item: any) => {
+                const topLevelIndex = topLevelItems.findIndex((t: any) => t.id === item.id);
+                const shortcutNum = topLevelIndex !== -1 && topLevelIndex < 9 ? topLevelIndex + 1 : null;
+
+                return (
+                  <button
+                    key={item.id}
+                    onClick={() => {
+                      if (item.hasChildren) {
+                        const next = new Set(openMenus);
+                        if (next.has(item.id)) next.delete(item.id);
+                        else next.add(item.id);
+                        setOpenMenus(next);
+                      } else {
+                        setCurrentView(item.id as View);
+                      }
+                      if (isSidebarCollapsed) {
+                        setIsSidebarCollapsed(false);
+                      }
+                    }}
+                    title={isSidebarCollapsed ? item.label : ''}
+                    className={`w-full flex items-center justify-between px-3 py-3 rounded-xl text-sm font-medium transition-all group ${
+                      currentView === item.id 
+                        ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 shadow-lg shadow-zinc-900/10' 
+                        : 'text-muted-foreground hover:bg-zinc-100 dark:hover:bg-zinc-800 hover:text-zinc-900 dark:hover:text-white'
+                    } ${isSidebarCollapsed ? 'justify-center' : ''} ${item.parentId ? 'ml-8' : ''}`}
+                  >
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <item.icon size={20} className="shrink-0" />
+                      {!isSidebarCollapsed && (
+                        <motion.span
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          className="truncate text-left"
+                        >
+                          {item.label}
+                        </motion.span>
+                      )}
+                    </div>
+                    {!isSidebarCollapsed && shortcutNum && (
+                      <span className="opacity-0 group-hover:opacity-100 transition-opacity duration-150 inline-flex items-center px-1.5 py-0.5 text-[9px] font-mono font-medium rounded border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 shadow-xs select-none">
+                        Alt+{shortcutNum}
+                      </span>
                     )}
-                  </div>
-                  {item.hasChildren && !isSidebarCollapsed && (
-                    <span className="shrink-0">
-                      {openMenus.has(item.id) ? '▲' : '▼'}
-                    </span>
-                  )}
-                </button>
-              ))}
+                    {item.hasChildren && !isSidebarCollapsed && (
+                      <span className="shrink-0 text-[10px] ml-1 group-hover:hidden">
+                        {openMenus.has(item.id) ? '▲' : '▼'}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
         </nav>
 
         <div className="p-3 border-t border-zinc-200 dark:border-zinc-800 space-y-2">
@@ -399,7 +457,12 @@ export default function App() {
               transition={{ duration: 0.2 }}
             >
               {currentView === 'dashboard' && <Dashboard />}
-              {currentView === 'transactions' && <Transactions />}
+              {currentView === 'transactions' && (
+                <Transactions 
+                  shouldOpenNewTransaction={shouldOpenNewTransaction} 
+                  onOpenNewTransactionComplete={() => setShouldOpenNewTransaction(false)} 
+                />
+              )}
               {currentView === 'client_receivables' && <ClientReceivables />}
               {currentView === 'quotations' && <Quotations />}
               {currentView === 'borrowers' && <BorrowerManagement />}
