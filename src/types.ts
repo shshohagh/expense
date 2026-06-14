@@ -112,6 +112,7 @@ export interface Client {
   deleted_at?: any;
   updatedAt?: any;
   updated_at?: any;
+  partyType?: 'Client' | 'Supplier';
 }
 
 export interface ClientLedger {
@@ -221,8 +222,10 @@ export interface PaymentCollection {
 export interface Quotation {
   id: string;
   ownerId: string;
-  clientId: string;
-  clientName: string;
+  clientId?: string;
+  clientName?: string;
+  supplierId?: string;
+  supplierName?: string;
   quotationNumber: string;
   status: 'Draft' | 'Sent' | 'Accepted' | 'Rejected' | 'Expired';
   totalAmount: number;
@@ -233,6 +236,7 @@ export interface Quotation {
   loggedToLedger?: boolean;
   createdAt: any;
   updatedAt: any;
+  type?: 'Client' | 'Supplier';
 }
 
 export interface QuotationItem {

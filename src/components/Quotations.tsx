@@ -9,9 +9,12 @@ import {
   deleteQuotation,
   addProject,
   addReceivable,
-  addLedgerEntry
+  addLedgerEntry,
+  subscribeToCategories,
+  addTransaction,
+  addClient
 } from '../services/firestoreService';
-import { Client, Quotation, QuotationItem } from '../types';
+import { Client, Quotation, QuotationItem, Category, Transaction } from '../types';
 import {
   FileText,
   FileCheck,
@@ -62,9 +65,25 @@ export default function Quotations() {
   };
 
   // UI flow and select/filter states
+  const [activeTab, setActiveTab] = useState<'Client' | 'Supplier'>('Client');
+  const [categories, setCategories] = useState<Category[]>([]);
   const [isQuotationModalOpen, setIsQuotationModalOpen] = useState(false);
   const [editingQuotation, setEditingQuotation] = useState<Quotation | null>(null);
   const [selectedQuotationForPrint, setSelectedQuotationForPrint] = useState<Quotation | null>(null);
+
+  // Quick Supplier Addition State
+  const [showQuickSupplierModal, setShowQuickSupplierModal] = useState(false);
+  const [quickSupplierName, setQuickSupplierName] = useState('');
+  const [quickSupplierCompany, setQuickSupplierCompany] = useState('');
+  const [quickSupplierPhone, setQuickSupplierPhone] = useState('');
+  const [quickSupplierEmail, setQuickSupplierEmail] = useState('');
+
+  // Expense Conversion Modal State
+  const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
+  const [selectedQuotationForExpense, setSelectedQuotationForExpense] = useState<Quotation | null>(null);
+  const [expenseCategory, setExpenseCategory] = useState<string>('');
+  const [expenseDate, setExpenseDate] = useState<string>('');
+  const [expenseDescription, setExpenseDescription] = useState<string>('');
 
   // Search & Filters
   const [searchTerm, setSearchTerm] = useState('');
@@ -101,25 +120,26 @@ export default function Quotations() {
     const unsubClients = subscribeToClients(userId, setClients);
     const unsubQuotations = subscribeToQuotations(userId, setQuotations);
     const unsubItems = subscribeToAllQuotationItems(userId, setAllQuotationItems);
+    const unsubCategories = subscribeToCategories(userId, setCategories);
 
     return () => {
       unsubClients();
       unsubQuotations();
       unsubItems();
+      unsubCategories();
     };
   }, [userId]);
 
   // Keep a unique autoincrement counter for sequence prefix
   useEffect(() => {
     if (!editingQuotation && isQuotationModalOpen) {
-      if (!quotationNumber) {
-        const year = new Date().getFullYear();
-        const count = quotations.length + 1;
-        const autoNum = `QT-${year}-${String(count).padStart(3, '0')}`;
-        setQuotationNumber(autoNum);
-      }
+      const year = new Date().getFullYear();
+      const count = quotations.filter(q => (q.type || 'Client') === activeTab).length + 1;
+      const prefix = activeTab === 'Supplier' ? 'SU' : 'QT';
+      const autoNum = `${prefix}-${year}-${String(count).padStart(3, '0')}`;
+      setQuotationNumber(autoNum);
     }
-  }, [isQuotationModalOpen, editingQuotation, quotations.length, quotationNumber]);
+  }, [isQuotationModalOpen, editingQuotation, quotations, activeTab]);
 
   // Modal open handlers
   const openCreateModal = () => {
@@ -141,13 +161,14 @@ export default function Quotations() {
 
   const openEditModal = (q: Quotation) => {
     setEditingQuotation(q);
-    setClientId(q.clientId);
+    setClientId(q.clientId || '');
     setQuotationNumber(q.quotationNumber);
     setProjectName(q.projectName);
     setDescription(q.description);
     setQuotationDate(q.quotationDate);
     setValidUntilDate(q.validUntilDate);
     setStatus(q.status);
+    setActiveTab(q.type || 'Client');
 
     // Get line items matching this quotation ID from allQuotationItems
     const matched = allQuotationItems.filter(item => item.quotationId === q.id);
@@ -221,7 +242,7 @@ export default function Quotations() {
   const handleSaveQuotation = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!clientId || !projectName.trim() || lineItems.some(i => !i.itemName.trim())) {
-      alert('Please fill out all required fields and name every row item.');
+      alert(`Please select a ${activeTab === 'Supplier' ? 'supplier' : 'client'} and provide a project title & line items.`);
       return;
     }
 
@@ -232,13 +253,14 @@ export default function Quotations() {
       ownerId: userId,
       clientId,
       clientName: matchedClient.name,
-      quotationNumber: quotationNumber.trim() || `QT-${Date.now()}`,
+      quotationNumber: quotationNumber.trim() || `${activeTab === 'Supplier' ? 'SU' : 'QT'}-${Date.now()}`,
       status,
       totalAmount: grandTotalSum,
       quotationDate,
       validUntilDate,
       projectName: projectName.trim(),
-      description: description.trim()
+      description: description.trim(),
+      type: activeTab
     };
 
     if (editingQuotation) {
@@ -248,7 +270,7 @@ export default function Quotations() {
 
       await updateQuotation(editingQuotation.id, payload, lineItems);
 
-      if (newlyAccepted) {
+      if (newlyAccepted && activeTab === 'Client') {
         await logAcceptedToLedger({
           ...payload,
           id: editingQuotation.id
@@ -258,7 +280,7 @@ export default function Quotations() {
       const isAccepted = status === 'Accepted';
       const qId = await addQuotation(payload, lineItems);
       
-      if (isAccepted && qId) {
+      if (isAccepted && qId && activeTab === 'Client') {
         await logAcceptedToLedger({
           ...payload,
           id: qId
@@ -267,6 +289,89 @@ export default function Quotations() {
     }
 
     setIsQuotationModalOpen(false);
+  };
+
+  const handleQuickAddSupplier = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!quickSupplierName.trim()) return;
+
+    try {
+      const newSupplierId = await addClient({
+        userId,
+        name: quickSupplierName.trim(),
+        companyName: quickSupplierCompany.trim() || undefined,
+        mobileNumber: quickSupplierPhone.trim() || undefined,
+        whatsAppNumber: quickSupplierPhone.trim() || undefined,
+        email: quickSupplierEmail.trim() || undefined,
+        balance: 0,
+        partyType: 'Supplier',
+        status: 'Active'
+      });
+
+      if (newSupplierId) {
+        setClientId(newSupplierId);
+        showToast('Supplier added successfully!', 'success');
+        // Clear quick add fields
+        setQuickSupplierName('');
+        setQuickSupplierCompany('');
+        setQuickSupplierPhone('');
+        setQuickSupplierEmail('');
+        setShowQuickSupplierModal(false);
+      }
+    } catch (err) {
+      console.error(err);
+      showToast('Failed to add supplier.', 'error');
+    }
+  };
+
+  const openExpenseConversionModal = (q: Quotation) => {
+    setSelectedQuotationForExpense(q);
+    // Find first Expense category
+    const firstExpenseCat = categories.find(c => c.type === 'EXPENSE');
+    setExpenseCategory(firstExpenseCat ? (firstExpenseCat.id as string) : '');
+    setExpenseDate(new Date().toISOString().split('T')[0]);
+    setExpenseDescription(`Supplier Quotation #${q.quotationNumber} - ${q.projectName}`);
+    setIsExpenseModalOpen(true);
+  };
+
+  const handleConvertSupplierQuotationToExpense = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedQuotationForExpense) return;
+
+    try {
+      const matchedCat = categories.find(c => c.id === expenseCategory);
+      const catName = matchedCat ? matchedCat.name : 'Uncategorized';
+
+      const transactionId = await addTransaction({
+        userId,
+        type: 'EXPENSE',
+        amount: Number(selectedQuotationForExpense.totalAmount),
+        categoryId: expenseCategory || 'custom',
+        categoryName: catName,
+        date: expenseDate || new Date().toISOString().split('T')[0],
+        description: expenseDescription.trim(),
+        status: 'ACTIVE'
+      });
+
+      if (transactionId) {
+        // Find line items
+        const matchedItems = allQuotationItems.filter(item => item.quotationId === selectedQuotationForExpense.id);
+
+        // Update status of quotation
+        await updateQuotation(selectedQuotationForExpense.id, {
+          ...selectedQuotationForExpense,
+          status: 'Accepted',
+          loggedToLedger: true
+        }, matchedItems);
+
+        showToast('Successfully logged as system expense!', 'success');
+        setIsExpenseModalOpen(false);
+        setSelectedQuotationForExpense(null);
+      }
+    } catch (err) {
+      console.error(err);
+      showToast('Failed to log expense.', 'error');
+    }
   };
 
   const logAcceptedToLedger = async (q: Quotation) => {
@@ -421,19 +526,22 @@ export default function Quotations() {
     window.open(url, '_blank');
   };
 
+  // Tab-filtered quotations list
+  const tabQuotations = quotations.filter(q => (q.type || 'Client') === activeTab);
+
   // Widgets calculations
-  const totalCount = quotations.length;
-  const acceptedCount = quotations.filter(q => q.status === 'Accepted').length;
-  const pendingCount = quotations.filter(q => q.status === 'Draft' || q.status === 'Sent').length;
+  const totalCount = tabQuotations.length;
+  const acceptedCount = tabQuotations.filter(q => q.status === 'Accepted').length;
+  const pendingCount = tabQuotations.filter(q => q.status === 'Draft' || q.status === 'Sent').length;
   const conversionRate = totalCount > 0 ? ((acceptedCount / totalCount) * 100).toFixed(1) : '0';
 
   // Apply filters on lists
-  const filteredQuotations = quotations.filter(q => {
+  const filteredQuotations = tabQuotations.filter(q => {
     // Search Term matches number, client, project, description
     const term = searchTerm.trim().toLowerCase();
     const matchesSearch = !term || 
       q.quotationNumber.toLowerCase().includes(term) ||
-      q.clientName.toLowerCase().includes(term) ||
+      (q.clientName || '').toLowerCase().includes(term) ||
       q.projectName.toLowerCase().includes(term) ||
       q.description.toLowerCase().includes(term);
 
@@ -463,24 +571,53 @@ export default function Quotations() {
     <div className="space-y-6">
       {/* Module Title / Header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-zinc-200 dark:border-zinc-800 pb-5">
-        <div>
+        <div className="space-y-2">
           <h1 className="text-3xl font-extrabold tracking-tight font-sans text-zinc-900 dark:text-zinc-50">
             Quotation Management
           </h1>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            {activeTab === 'Client' 
+              ? 'Manage outgoing price proposals and scopes of work sent to clients.' 
+              : 'Review and log incoming quotes, prices, and bids offered by suppliers.'}
+          </p>
         </div>
 
-        <div>
+        <div className="flex items-center gap-3">
+          {/* Tab pill switcher */}
+          <div className="flex bg-zinc-100 dark:bg-zinc-800 p-1 rounded-xl">
+            <button
+              onClick={() => { setActiveTab('Client'); setClientFilter('ALL'); }}
+              className={`py-1.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                activeTab === 'Client'
+                  ? 'bg-white dark:bg-zinc-900 text-zinc-950 dark:text-zinc-50 shadow-sm'
+                  : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
+              }`}
+            >
+              <FileText size={13} /> Client Proposals
+            </button>
+            <button
+              onClick={() => { setActiveTab('Supplier'); setClientFilter('ALL'); }}
+              className={`py-1.5 px-3 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                activeTab === 'Supplier'
+                  ? 'bg-white dark:bg-zinc-900 text-zinc-950 dark:text-zinc-50 shadow-sm'
+                  : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
+              }`}
+            >
+              <FileCheck size={13} /> Supplier Bids
+            </button>
+          </div>
+
           <button
             onClick={openCreateModal}
-            className="flex items-center gap-2 bg-zinc-950 dark:bg-zinc-50 dark:text-zinc-950 text-white rounded-xl px-4 py-2.5 text-xs font-semibold hover:opacity-90 transition-all shadow-md cursor-pointer"
+            className="flex items-center gap-2 bg-zinc-950 dark:bg-zinc-50 dark:text-zinc-950 text-white rounded-xl px-4 py-2.5 text-xs font-semibold hover:opacity-90 transition-all shadow-md cursor-pointer shrink-0"
           >
-            <Plus size={16} /> New
+            <Plus size={16} /> New {activeTab === 'Supplier' ? 'Supplier Quote' : 'Client Quote'}
           </button>
         </div>
       </div>
 
       {/* Awaiting Ledger Log Banner */}
-      {quotations.some(q => q.status === 'Accepted' && !q.loggedToLedger) && (
+      {quotations.some(q => (q.type || 'Client') === 'Client' && q.status === 'Accepted' && !q.loggedToLedger) && (
         <div className="bg-amber-50 dark:bg-amber-950/20 border border-amber-250 dark:border-amber-800/60 p-4 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 rounded-xl shrink-0">
@@ -495,7 +632,7 @@ export default function Quotations() {
           </div>
           <button
             onClick={async () => {
-              const pendingLogs = quotations.filter(q => q.status === 'Accepted' && !q.loggedToLedger);
+              const pendingLogs = quotations.filter(q => (q.type || 'Client') === 'Client' && q.status === 'Accepted' && !q.loggedToLedger);
               if (window.confirm(`Log Project Charges for all ${pendingLogs.length} newly accepted quotations now?`)) {
                 for (const q of pendingLogs) {
                   await logAcceptedToLedger(q);
@@ -505,7 +642,7 @@ export default function Quotations() {
             }}
             className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-extrabold uppercase tracking-widest rounded-xl transition-all cursor-pointer shadow-sm self-start sm:self-auto shrink-0"
           >
-            Auto-Log All ({quotations.filter(q => q.status === 'Accepted' && !q.loggedToLedger).length})
+            Auto-Log All ({quotations.filter(q => (q.type || 'Client') === 'Client' && q.status === 'Accepted' && !q.loggedToLedger).length})
           </button>
         </div>
       )}
@@ -611,18 +748,20 @@ export default function Quotations() {
               className="overflow-hidden border-t border-zinc-100 dark:border-zinc-800 pt-4"
             >
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 text-xs font-medium">
-                {/* Client Select */}
+                {/* Client / Supplier Select */}
                 <div className="flex flex-col gap-1.5">
-                  <label>Client</label>
+                  <label>{activeTab === 'Supplier' ? 'Supplier' : 'Client'}</label>
                   <select
                     value={clientFilter}
                     onChange={(e) => setClientFilter(e.target.value)}
                     className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2 text-xs outline-none"
                   >
-                    <option value="ALL">All Clients</option>
-                    {clients.map(c => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
+                    <option value="ALL">All {activeTab === 'Supplier' ? 'Suppliers' : 'Clients'}</option>
+                    {clients
+                      .filter(c => activeTab === 'Supplier' ? c.partyType === 'Supplier' : (c.partyType || 'Client') === 'Client')
+                      .map(c => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
                   </select>
                 </div>
 
@@ -698,11 +837,11 @@ export default function Quotations() {
             <thead>
               <tr className="border-b border-zinc-200 dark:border-zinc-800 text-zinc-400 dark:text-zinc-550 text-[10px] font-bold uppercase tracking-wider bg-zinc-50/50 dark:bg-zinc-900/50">
                 <th className="px-6 py-4">Quotation No. / Date</th>
-                <th className="px-6 py-4">Client Name</th>
+                <th className="px-6 py-4">{activeTab === 'Supplier' ? 'Supplier Name' : 'Client Name'}</th>
                 <th className="px-6 py-4">Project / Service Name</th>
                 <th className="px-6 py-4 text-right">Total Amount</th>
                 <th className="px-6 py-4">Status</th>
-                <th className="px-6 py-4 text-center">Share / Convert</th>
+                <th className="px-6 py-4 text-center">{activeTab === 'Supplier' ? 'Actions / Log' : 'Share / Convert'}</th>
                 <th className="px-6 py-4 text-right">Actions</th>
               </tr>
             </thead>
@@ -766,14 +905,16 @@ export default function Quotations() {
                       </td>
                       <td className="px-6 py-4.5">
                         <div className="flex items-center justify-center gap-1.5">
-                          {/* WhatsApp Button */}
-                          <button
-                            onClick={() => sendWhatsAppQuotation(q)}
-                            className="p-2 text-zinc-650 hover:text-emerald-550 hover:bg-emerald-50 dark:hover:bg-emerald-950/20 rounded-lg transition-all"
-                            title="Send status via WhatsApp"
-                          >
-                            <Send size={15} />
-                          </button>
+                          {activeTab === 'Client' && (
+                            /* WhatsApp Button */
+                            <button
+                              onClick={() => sendWhatsAppQuotation(q)}
+                              className="p-2 text-zinc-650 hover:text-emerald-550 hover:bg-emerald-50 dark:hover:bg-emerald-950/20 rounded-lg transition-all"
+                              title="Send status via WhatsApp"
+                            >
+                              <Send size={15} />
+                            </button>
+                          )}
 
                           {/* Print view */}
                           <button
@@ -784,39 +925,65 @@ export default function Quotations() {
                             <Printer size={15} />
                           </button>
 
-                          {/* Convert actions if Approved */}
                           {q.status === 'Accepted' && (
-                            <div className="flex gap-1 border-l border-zinc-200 dark:border-zinc-800 pl-2">
-                              {/* Create Project */}
-                              <button
-                                onClick={() => convertToProject(q)}
-                                className="flex items-center gap-1 px-2.5 py-1.5 bg-zinc-900 border border-zinc-800 hover:bg-zinc-850 text-[10px] font-extrabold tracking-wider uppercase text-white dark:bg-zinc-100 dark:text-zinc-900 dark:border-white rounded-lg transition-all shadow-sm"
-                                title="Convert To Project"
-                              >
-                                Project
-                              </button>
-                              {/* Create Receivable */}
-                              <button
-                                onClick={() => convertToReceivable(q)}
-                                className="flex items-center gap-1 px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-[10px] font-extrabold tracking-wider uppercase text-white rounded-lg transition-all shadow-sm"
-                                title="Create Due Record"
-                              >
-                                Invoice
-                              </button>
-                            </div>
+                            activeTab === 'Supplier' ? (
+                              <div className="flex gap-1 border-l border-zinc-200 dark:border-zinc-800 pl-2">
+                                <button
+                                  onClick={() => openExpenseConversionModal(q)}
+                                  className={`flex items-center gap-1 px-2.5 py-1.5 text-[10px] font-extrabold tracking-wider uppercase text-white rounded-lg transition-all shadow-sm ${
+                                    q.loggedToLedger
+                                      ? 'bg-zinc-400 dark:bg-zinc-700 cursor-not-allowed'
+                                      : 'bg-indigo-600 hover:bg-indigo-700'
+                                  }`}
+                                  disabled={q.loggedToLedger}
+                                  title={q.loggedToLedger ? "Already logged" : "Log as System Expense"}
+                                >
+                                  {q.loggedToLedger ? 'Logged' : 'Log Expense'}
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex gap-1 border-l border-zinc-200 dark:border-zinc-800 pl-2">
+                                {/* Create Project */}
+                                <button
+                                  onClick={() => convertToProject(q)}
+                                  className="flex items-center gap-1 px-2.5 py-1.5 bg-zinc-900 border border-zinc-800 hover:bg-zinc-850 text-[10px] font-extrabold tracking-wider uppercase text-white dark:bg-zinc-100 dark:text-zinc-900 dark:border-white rounded-lg transition-all shadow-sm"
+                                  title="Convert To Project"
+                                >
+                                  Project
+                                </button>
+                                {/* Create Receivable */}
+                                <button
+                                  onClick={() => convertToReceivable(q)}
+                                  className="flex items-center gap-1 px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-[10px] font-extrabold tracking-wider uppercase text-white rounded-lg transition-all shadow-sm"
+                                  title="Create Due Record"
+                                >
+                                  Invoice
+                                </button>
+                              </div>
+                            )
                           )}
                         </div>
                       </td>
                       <td className="px-6 py-4.5 text-right">
                         <div className="flex justify-end items-center gap-1.5">
                           {q.status === 'Accepted' && !q.loggedToLedger && (
-                            <button
-                              onClick={() => logAcceptedToLedger(q)}
-                              className="px-2.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-[10px] font-extrabold uppercase tracking-widest text-white rounded-lg transition-all shadow-sm cursor-pointer"
-                              title="Log Project Charge to Client Ledger"
-                            >
-                              Log Ledger
-                            </button>
+                            activeTab === 'Supplier' ? (
+                              <button
+                                onClick={() => openExpenseConversionModal(q)}
+                                className="px-2.5 py-1.5 bg-indigo-650 hover:bg-indigo-700 text-[10px] font-extrabold uppercase tracking-widest text-white rounded-lg transition-all shadow-sm cursor-pointer"
+                                title="Log as System Expense"
+                              >
+                                Log Expense
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => logAcceptedToLedger(q)}
+                                className="px-2.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-[10px] font-extrabold uppercase tracking-widest text-white rounded-lg transition-all shadow-sm cursor-pointer"
+                                title="Log Project Charge to Client Ledger"
+                              >
+                                Log Ledger
+                              </button>
+                            )
                           )}
 
                           {/* Quick selection status */}
@@ -889,21 +1056,34 @@ export default function Quotations() {
               {/* Form Content Scrolling wrapper */}
               <form onSubmit={handleSaveQuotation} className="flex-1 overflow-y-auto p-6 space-y-6">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {/* Client Select */}
+                  {/* Client / Supplier Select */}
                   <div>
-                    <label className="block text-xs font-bold uppercase tracking-wider text-zinc-550 mb-1.5">
-                      Client Selection <span className="text-rose-500">*</span>
-                    </label>
+                    <div className="flex justify-between items-center mb-1.5">
+                      <label className="block text-xs font-bold uppercase tracking-wider text-zinc-550">
+                        {activeTab === 'Supplier' ? 'Supplier Selection' : 'Client Selection'} <span className="text-rose-500">*</span>
+                      </label>
+                      {activeTab === 'Supplier' && (
+                        <button
+                          type="button"
+                          onClick={() => setShowQuickSupplierModal(true)}
+                          className="text-[10px] font-black uppercase text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1 cursor-pointer"
+                        >
+                          <Plus size={10} /> Quick Add Supplier
+                        </button>
+                      )}
+                    </div>
                     <select
                       value={clientId}
                       onChange={(e) => setClientId(e.target.value)}
                       required
                       className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2.5 text-sm outline-none"
                     >
-                      <option value="">-- Choose Client --</option>
-                      {clients.map(c => (
-                        <option key={c.id} value={c.id}>{c.name} {c.companyName ? `(${c.companyName})` : ''}</option>
-                      ))}
+                      <option value="">-- Choose {activeTab === 'Supplier' ? 'Supplier' : 'Client'} --</option>
+                      {clients
+                        .filter(c => activeTab === 'Supplier' ? c.partyType === 'Supplier' : (c.partyType || 'Client') === 'Client')
+                        .map(c => (
+                          <option key={c.id} value={c.id}>{c.name} {c.companyName ? `(${c.companyName})` : ''}</option>
+                        ))}
                     </select>
                   </div>
 
@@ -1381,6 +1561,202 @@ export default function Quotations() {
       />
 
 
+
+      {/* QUICK ADD SUPPLIER MODAL */}
+      <AnimatePresence>
+        {showQuickSupplierModal && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white dark:bg-zinc-900 rounded-2xl w-full max-w-md border border-zinc-200 dark:border-zinc-800 shadow-2xl p-6 space-y-4"
+            >
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-extrabold text-zinc-950 dark:text-white">Quick Add Supplier</h3>
+                <button
+                  type="button"
+                  onClick={() => setShowQuickSupplierModal(false)}
+                  className="p-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg text-zinc-400"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <form onSubmit={handleQuickAddSupplier} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-zinc-550 mb-1">
+                    Supplier / Vendor Name <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={quickSupplierName}
+                    onChange={(e) => setQuickSupplierName(e.target.value)}
+                    placeholder="e.g. Acme Tech Corp"
+                    className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2 text-sm outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-zinc-550 mb-1">
+                    Company Name (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={quickSupplierCompany}
+                    onChange={(e) => setQuickSupplierCompany(e.target.value)}
+                    placeholder="e.g. Acme Solutions LLC"
+                    className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2 text-sm outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-zinc-550 mb-1">
+                    Phone Number (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={quickSupplierPhone}
+                    onChange={(e) => setQuickSupplierPhone(e.target.value)}
+                    placeholder="e.g. +8801700000000"
+                    className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2 text-sm outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-zinc-550 mb-1">
+                    Email Address (Optional)
+                  </label>
+                  <input
+                    type="email"
+                    value={quickSupplierEmail}
+                    onChange={(e) => setQuickSupplierEmail(e.target.value)}
+                    placeholder="e.g. contact@acme.com"
+                    className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2 text-sm outline-none"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowQuickSupplierModal(false)}
+                    className="px-4 py-2 border border-zinc-250 dark:border-zinc-700 text-zinc-500 rounded-xl text-xs font-bold hover:bg-zinc-50 dark:hover:bg-zinc-850"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md"
+                  >
+                    Create Supplier
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* CONVERT TO SYSTEM EXPENSE MODAL */}
+      <AnimatePresence>
+        {isExpenseModalOpen && selectedQuotationForExpense && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[110] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white dark:bg-zinc-900 rounded-2xl w-full max-w-md border border-zinc-200 dark:border-zinc-800 shadow-2xl p-6 space-y-4"
+            >
+              <div className="flex items-center justify-between">
+                <h3 className="text-lg font-extrabold text-zinc-950 dark:text-white">Convert to System Expense</h3>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsExpenseModalOpen(false);
+                    setSelectedQuotationForExpense(null);
+                  }}
+                  className="p-1 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg text-zinc-400"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="p-3 bg-indigo-50 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900/40 rounded-xl space-y-1">
+                <p className="text-xs text-indigo-700 dark:text-indigo-400 font-bold uppercase tracking-wider">Source Bid Summary</p>
+                <p className="text-sm font-black text-zinc-900 dark:text-white">#{selectedQuotationForExpense.quotationNumber} - {selectedQuotationForExpense.projectName}</p>
+                <p className="text-xs text-zinc-500 font-medium">Supplier: <span className="font-extrabold">{selectedQuotationForExpense.clientName}</span>, Amount: <span className="font-extrabold text-indigo-600 text-sm">৳{selectedQuotationForExpense.totalAmount.toFixed(2)}</span></p>
+              </div>
+
+              <form onSubmit={handleConvertSupplierQuotationToExpense} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-zinc-550 mb-1">
+                    Expense Category <span className="text-rose-500">*</span>
+                  </label>
+                  <select
+                    value={expenseCategory}
+                    onChange={(e) => setExpenseCategory(e.target.value)}
+                    required
+                    className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2 text-sm outline-none"
+                  >
+                    <option value="">-- Choose Category --</option>
+                    {categories
+                      .filter(c => c.type === 'EXPENSE')
+                      .map(cat => (
+                        <option key={cat.id} value={cat.id}>{cat.name}</option>
+                      ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-zinc-550 mb-1">
+                    Expense Posting Date <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={expenseDate}
+                    onChange={(e) => setExpenseDate(e.target.value)}
+                    className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2 text-sm outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-zinc-550 mb-1">
+                    Expense Description
+                  </label>
+                  <textarea
+                    value={expenseDescription}
+                    onChange={(e) => setExpenseDescription(e.target.value)}
+                    rows={3}
+                    placeholder="e.g. Acme Tech servers purchase"
+                    className="w-full bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-xl px-3 py-2 text-sm outline-none resize-none"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsExpenseModalOpen(false);
+                      setSelectedQuotationForExpense(null);
+                    }}
+                    className="px-4 py-2 border border-zinc-250 dark:border-zinc-700 text-zinc-500 rounded-xl text-xs font-bold hover:bg-zinc-50 dark:hover:bg-zinc-850"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md"
+                  >
+                    Confirm & Register Expense
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* Toast Notification Banner */}
       <AnimatePresence>

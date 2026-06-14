@@ -450,7 +450,7 @@ export default function ClientReceivables() {
   }, [receivables, clients]);
 
   const activeClientsWithDueCount = React.useMemo(() => {
-    return clients.filter(c => {
+    return clients.filter(c => c.partyType !== 'Supplier').filter(c => {
       const bal = clientBalancesMap[c.id] || 0;
       return bal > 0.01;
     }).length;
@@ -458,7 +458,7 @@ export default function ClientReceivables() {
 
   // Compatibility aliases
   const totalReceivable = outstandingBalance;
-  const activeClientsCount = clients.length;
+  const activeClientsCount = clients.filter(c => c.partyType !== 'Supplier').length;
   const activeSubsCount = subscriptions.filter(s => s.status === 'Active').length;
   const overdueReceivablesCount = overdueClientsCount;
 
@@ -1397,6 +1397,7 @@ export default function ClientReceivables() {
               </thead>
               <tbody>
                 {clients
+                  .filter(c => c.partyType !== 'Supplier')
                   .filter(c => {
                     const term = searchTerm.toLowerCase();
                     return c.name.toLowerCase().includes(term) || (c.companyName || '').toLowerCase().includes(term);
@@ -2650,7 +2651,7 @@ export default function ClientReceivables() {
                     className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-3 py-2.5 outline-none font-semibold"
                   >
                     <option value="">-- Choose Client Profile --</option>
-                    {clients.map(c => (
+                    {clients.filter(c => c.partyType !== 'Supplier').map(c => (
                       <option key={c.id} value={c.id}>{c.name}</option>
                     ))}
                   </select>
@@ -2827,7 +2828,7 @@ export default function ClientReceivables() {
                     className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-3 py-2.5 outline-none"
                   >
                     <option value="">-- Choose Client Profile --</option>
-                    {clients.map(c => (
+                    {clients.filter(c => c.partyType !== 'Supplier').map(c => (
                       <option key={c.id} value={c.id}>{c.name}</option>
                     ))}
                   </select>
@@ -3185,7 +3186,7 @@ export default function ClientReceivables() {
                     className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-3 py-2.5 outline-none"
                   >
                     <option value="">-- Choose Client Profile --</option>
-                    {clients.map(c => (
+                    {clients.filter(c => c.partyType !== 'Supplier').map(c => (
                       <option key={c.id} value={c.id}>{c.name}</option>
                     ))}
                   </select>
@@ -3273,7 +3274,7 @@ export default function ClientReceivables() {
                     className="w-full bg-zinc-55 dark:bg-zinc-800 border-0 rounded-xl px-3 py-2.5 outline-none"
                   >
                     <option value="">-- Choose Client --</option>
-                    {clients.map(c => (
+                    {clients.filter(c => c.partyType !== 'Supplier').map(c => (
                       <option key={c.id} value={c.id}>{c.name} ({renderMoney(clientBalancesMap[c.id] || 0)} due)</option>
                     ))}
                   </select>

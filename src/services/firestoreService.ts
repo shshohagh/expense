@@ -68,6 +68,27 @@ export const deleteBorrower = async (id: string) => {
   }
 };
 
+const cleanUndefined = (obj: any): any => {
+  if (obj === null || obj === undefined) return obj;
+  if (Array.isArray(obj)) {
+    return obj.map(cleanUndefined);
+  }
+  if (typeof obj === 'object') {
+    const proto = Object.getPrototypeOf(obj);
+    if (proto === null || proto === Object.prototype) {
+      const cleaned: any = {};
+      for (const key of Object.keys(obj)) {
+        const val = obj[key];
+        if (val !== undefined) {
+          cleaned[key] = cleanUndefined(val);
+        }
+      }
+      return cleaned;
+    }
+  }
+  return obj;
+};
+
 const handleFirestoreError = (error: any, operation: string, path: string) => {
   const errInfo = {
     error: error.message,
@@ -809,12 +830,12 @@ export const subscribeToClients = (userId: string, callback: (clients: Client[])
 
 export const addClient = async (client: Omit<Client, 'id' | 'created_at'>) => {
   try {
-    const docRef = await addDoc(collection(db, 'clients'), {
+    const docRef = await addDoc(collection(db, 'clients'), cleanUndefined({
       ...client,
       balance: client.balance || 0,
       created_at: serverTimestamp(),
       deleted_at: null
-    });
+    }));
     return docRef.id;
   } catch (error) {
     handleFirestoreError(error, 'CREATE', 'clients');
@@ -823,7 +844,7 @@ export const addClient = async (client: Omit<Client, 'id' | 'created_at'>) => {
 
 export const updateClient = async (id: string, data: Partial<Client>) => {
   try {
-    await updateDoc(doc(db, 'clients', id), data);
+    await updateDoc(doc(db, 'clients', id), cleanUndefined(data));
   } catch (error) {
     handleFirestoreError(error, 'UPDATE', `clients/${id}`);
   }

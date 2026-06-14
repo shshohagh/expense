@@ -93,8 +93,8 @@ export default function App() {
     { id: 'ledger', label: 'Ledger', icon: BookOpen, parentId: 'reports' },
     { id: 'monthly_cash_flow', label: 'Monthly Cash Flow', icon: FileText, parentId: 'reports' },
     { id: 'annual_breakdown', label: 'Annual Breakdown', icon: FileText, parentId: 'reports' },
+    { id: 'activity', label: 'Activity', icon: History, parentId: 'reports' },
     { id: 'recurring', label: t('recurring', lang), icon: Repeat },
-    { id: 'activity', label: 'Activity', icon: History },
     ...(user?.permissions?.includes('manage_categories') || user?.role === 'SUPER_ADMIN' ? [
       { id: 'categories', label: t('categories', lang), icon: Tags }
     ] : []),

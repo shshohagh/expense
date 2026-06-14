@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { Transaction, Budget } from '../types';
+import { Transaction, Budget, Category } from '../types';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
   PieChart, Pie, Cell, Legend, AreaChart, Area
@@ -8,10 +8,10 @@ import {
 import { formatCurrency, t } from '../utils/i18n';
 import { 
   ArrowUpCircle, ArrowDownCircle, Wallet, TrendingUp, TrendingDown, 
-  Eye, EyeOff, Target, PiggyBank, Percent, Calendar
+  Eye, EyeOff, Target, PiggyBank, Percent, Calendar, Plus, X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { subscribeToTransactions, subscribeToBudgets } from '../services/firestoreService';
+import { subscribeToTransactions, subscribeToBudgets, subscribeToCategories, addTransaction } from '../services/firestoreService';
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -21,6 +21,19 @@ export default function Dashboard() {
   const [showBalance, setShowBalance] = useState(false);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const timeoutRef = React.useRef<NodeJS.Timeout | null>(null);
+
+  // States for Quick Add Modal
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [formData, setFormData] = useState({
+    type: 'EXPENSE' as 'INCOME' | 'EXPENSE',
+    amount: '',
+    categoryId: '',
+    date: new Date().toISOString().split('T')[0],
+    description: '',
+    status: 'ACTIVE' as 'ACTIVE' | 'INACTIVE',
+  });
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const lang = user?.language || 'en';
   const currency = user?.currency || 'USD';
@@ -45,12 +58,54 @@ export default function Dashboard() {
       setBudgets(data);
     });
 
+    const unsubCategories = subscribeToCategories(user.id.toString(), (data) => {
+      setCategories(data);
+    });
+
     return () => {
       unsubTransactions();
       unsubBudgets();
+      unsubCategories();
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
     };
   }, [user?.id]);
+
+  const handleQuickAddSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user?.id || isSubmitting) return;
+
+    setIsSubmitting(true);
+    const category = categories.find(c => c.id.toString() === formData.categoryId);
+    const transactionData = {
+      userId: user.id.toString(),
+      type: formData.type,
+      amount: parseFloat(formData.amount),
+      categoryId: formData.categoryId,
+      categoryName: category?.name || 'Unknown',
+      date: formData.date,
+      description: formData.description,
+      status: formData.status,
+    };
+
+    try {
+      await addTransaction(transactionData);
+      setShowAddModal(false);
+      setFormData({
+        type: 'EXPENSE',
+        amount: '',
+        categoryId: '',
+        date: new Date().toISOString().split('T')[0],
+        description: '',
+        status: 'ACTIVE',
+      });
+    } catch (error) {
+      console.error('Error adding transaction:', error);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const filteredCategories = categories.filter(c => c.type === formData.type);
 
   const activeTransactions = transactions.filter(t => t.status === 'ACTIVE' || !t.status);
 
@@ -448,7 +503,7 @@ export default function Dashboard() {
                       <div className="text-right flex flex-col items-end shrink-0">
                         <span className="text-sm font-bold text-rose-500">{formatCurrency(t.amount, currency, lang)}</span>
                         <span className="text-[9px] px-1.5 py-0.5 bg-zinc-100 dark:bg-zinc-800 rounded-lg text-zinc-500">
-                          {t.categoryName || 'Uncategorized'}
+                           {t.categoryName || 'Uncategorized'}
                         </span>
                       </div>
                     </div>
@@ -463,6 +518,160 @@ export default function Dashboard() {
           </motion.div>
         </div>
       </div>
+
+      {/* Floating Action Button */}
+      <div className="fixed bottom-6 right-6 z-40">
+        <motion.button
+          whileHover={{ scale: 1.1 }}
+          whileTap={{ scale: 0.9 }}
+          onClick={() => {
+            setFormData({
+              type: 'EXPENSE',
+              amount: '',
+              categoryId: '',
+              date: new Date().toISOString().split('T')[0],
+              description: '',
+              status: 'ACTIVE',
+            });
+            setShowAddModal(true);
+          }}
+          className="p-4 bg-zinc-950 dark:bg-zinc-50 text-white dark:text-zinc-950 rounded-full shadow-2xl hover:opacity-90 transition-all flex items-center justify-center border border-zinc-200/20 dark:border-zinc-800/20 focus:outline-none focus:ring-2 focus:ring-zinc-950 dark:focus:ring-zinc-50"
+          title="Quick add transaction"
+          id="quick-add-transaction-fab"
+        >
+          <Plus size={24} />
+        </motion.button>
+      </div>
+
+      {/* Quick Add Modal */}
+      <AnimatePresence>
+        {showAddModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" id="quick-add-modal-overlay">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="w-full max-w-md bg-white dark:bg-zinc-900 rounded-2xl shadow-xl border border-zinc-200 dark:border-zinc-800 overflow-hidden"
+              id="quick-add-modal-container"
+            >
+              <div className="p-6 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
+                <h2 className="text-xl font-bold">Quick Add Transaction</h2>
+                <button 
+                  onClick={() => setShowAddModal(false)}
+                  className="p-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 rounded-lg transition-colors"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <form onSubmit={handleQuickAddSubmit} className="p-6 space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <button
+                    type="button"
+                    onClick={() => setFormData({ ...formData, type: 'EXPENSE' })}
+                    className={`py-2 text-sm font-medium rounded-xl border transition-all ${
+                      formData.type === 'EXPENSE' 
+                        ? 'bg-rose-50 border-rose-200 text-rose-600 dark:bg-rose-900/20 dark:border-rose-800' 
+                        : 'bg-white border-zinc-200 text-muted-foreground dark:bg-zinc-900 dark:border-zinc-800'
+                    }`}
+                  >
+                    Expense
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFormData({ ...formData, type: 'INCOME' })}
+                    className={`py-2 text-sm font-medium rounded-xl border transition-all ${
+                      formData.type === 'INCOME' 
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-600 dark:bg-emerald-900/20 dark:border-emerald-800' 
+                        : 'bg-white border-zinc-200 text-muted-foreground dark:bg-zinc-900 dark:border-zinc-800'
+                    }`}
+                  >
+                    Income
+                  </button>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Amount</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    required
+                    value={formData.amount}
+                    onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
+                    className="w-full px-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100"
+                    placeholder="0.00"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Category</label>
+                  <select
+                    required
+                    value={formData.categoryId}
+                    onChange={(e) => setFormData({ ...formData, categoryId: e.target.value })}
+                    className="w-full px-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100"
+                  >
+                    <option value="">Select Category</option>
+                    {filteredCategories.map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Date</label>
+                  <input
+                    type="date"
+                    required
+                    value={formData.date}
+                    onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                    className="w-full px-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Description (Optional)</label>
+                  <textarea
+                    value={formData.description}
+                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                    className="w-full px-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100"
+                    rows={2}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Status</label>
+                  <select
+                    value={formData.status}
+                    onChange={(e) => setFormData({ ...formData, status: e.target.value as 'ACTIVE' | 'INACTIVE' })}
+                    className="w-full px-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100"
+                  >
+                    <option value="ACTIVE">Active (Calculate in totals)</option>
+                    <option value="INACTIVE">Inactive (Ignore in totals)</option>
+                  </select>
+                </div>
+
+                <div className="flex gap-3 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddModal(false)}
+                    className="flex-1 px-4 py-2 text-sm font-medium bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="flex-1 px-4 py-2 text-sm font-medium bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 rounded-xl hover:opacity-90 disabled:opacity-50"
+                  >
+                    {isSubmitting ? 'Adding...' : 'Add Transaction'}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
