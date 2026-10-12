@@ -25,10 +25,10 @@ export default function DeleteConfirmationModal({
   const [clicked, setClicked] = React.useState(false);
 
   React.useEffect(() => {
-    if (!isOpen) {
+    if (!isOpen || !isLoading) {
       setClicked(false);
     }
-  }, [isOpen]);
+  }, [isOpen, isLoading]);
 
   const handleConfirm = async () => {
     if (clicked || isLoading) return;

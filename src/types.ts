@@ -31,6 +31,7 @@ export interface Category {
   name: string;
   type: 'INCOME' | 'EXPENSE';
   isDemo?: boolean;
+  deleted_at?: string | null;
 }
 
 export interface AuthState {
@@ -250,6 +251,52 @@ export interface QuotationItem {
   discount: number; // percentage (e.g. 10 for 10%)
   tax: number; // percentage (e.g. 5 for 5%)
   total: number;
+}
+
+// --- AI Insights & Budget Optimization Types ---
+export interface CategorySpendingInsight {
+  category: string;
+  amount: number;
+  percentage: number;
+  transactionCount?: number;
+  averagePerTransaction?: number;
+  trend: 'increasing' | 'decreasing' | 'stable';
+  benchmarkPercentage?: number;
+  status: 'optimal' | 'moderate' | 'excessive';
+  analysis: string;
+}
+
+export interface BudgetOptimizationSuggestion {
+  category: string;
+  currentSpend: number;
+  suggestedBudget: number;
+  potentialMonthlySavings: number;
+  savingsPercentage?: number;
+  priority: 'HIGH' | 'MEDIUM' | 'LOW';
+  rationale: string;
+  actionPlan: string;
+}
+
+export interface SmartMilestone {
+  title: string;
+  targetAmount: number;
+  timeframeMonths: number;
+  description: string;
+}
+
+export interface AiSpendingInsights {
+  financialHealthScore: number;
+  healthStatus: 'Excellent' | 'Good' | 'Needs Attention' | 'Critical';
+  executiveSummary: string;
+  topSpendingCategories: CategorySpendingInsight[];
+  budgetOptimizations: BudgetOptimizationSuggestion[];
+  projectedMonthlySavings: number;
+  projectedAnnualSavings: number;
+  smartMilestones?: SmartMilestone[];
+  keyRisks?: string[];
+  aiPowered: boolean;
+  analyzedTransactionsCount: number;
+  generatedAt: string;
 }
 
 

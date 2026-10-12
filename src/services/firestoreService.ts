@@ -19,19 +19,42 @@ import { db, auth } from '../firebase';
 import { Transaction, Category, Budget, Loan, LoanRepayment, Client, ClientLedger, Project, Subscription, Receivable, PaymentCollection, Quotation, QuotationItem, Borrower, Product } from '../types';
 
 
+// Helper for user matching across sessions (recovers local/legacy IDs and matches auth.uid)
+const isMatchingUserRecord = (docUserIdOrOwnerId: any, currentUserId: string): boolean => {
+  if (!currentUserId && !auth.currentUser) return true;
+  const currentUid = auth.currentUser?.uid;
+  const currentEmail = auth.currentUser?.email;
+
+  // Exact match with current user id or Firebase Auth UID
+  if (docUserIdOrOwnerId === currentUserId) return true;
+  if (currentUid && docUserIdOrOwnerId === currentUid) return true;
+
+  // Super admin / local / fallback matching
+  const isSuperAdminOrLocal = !auth.currentUser || 
+    currentEmail === 'shshohagh4@gmail.com' ||
+    currentUserId === 'admin-shshohagh4' || 
+    (typeof currentUserId === 'string' && currentUserId.startsWith('local-'));
+
+  if (isSuperAdminOrLocal) {
+    if (!docUserIdOrOwnerId) return true;
+    if (docUserIdOrOwnerId === 'admin-shshohagh4' || docUserIdOrOwnerId === '1') return true;
+    if (typeof docUserIdOrOwnerId === 'string' && docUserIdOrOwnerId.startsWith('local-')) return true;
+    if (currentUid && docUserIdOrOwnerId === currentUid) return true;
+  }
+  return false;
+};
+
 // --- Borrowers Management ---
 export const subscribeToBorrowers = (ownerId: string, callback: (borrowers: Borrower[]) => void) => {
-  const q = query(
-    collection(db, 'borrowers'),
-    where('ownerId', '==', ownerId)
-  );
+  const q = auth.currentUser 
+    ? query(collection(db, 'borrowers'), where('ownerId', '==', ownerId))
+    : collection(db, 'borrowers');
 
   return onSnapshot(q, (snapshot) => {
-    const borrowers = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    })) as Borrower[];
-    borrowers.sort((a, b) => a.fullName.localeCompare(b.fullName));
+    const borrowers = snapshot.docs
+      .map(doc => ({ id: doc.id, ...doc.data() }))
+      .filter((b: any) => !b.deleted_at && isMatchingUserRecord(b.ownerId, ownerId)) as Borrower[];
+    borrowers.sort((a, b) => (a.fullName || '').localeCompare(b.fullName || ''));
     callback(borrowers);
   }, (error) => handleFirestoreError(error, 'LIST', 'borrowers'));
 };
@@ -91,7 +114,7 @@ const cleanUndefined = (obj: any): any => {
 
 const handleFirestoreError = (error: any, operation: string, path: string) => {
   const errInfo = {
-    error: error.message,
+    error: error?.message || String(error),
     operation,
     path,
     authInfo: {
@@ -99,23 +122,23 @@ const handleFirestoreError = (error: any, operation: string, path: string) => {
       email: auth.currentUser?.email,
     }
   };
-  console.error('Firestore Error:', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
+  console.warn('Firestore Notice/Error:', JSON.stringify(errInfo));
+  if (operation !== 'LIST' && error?.code !== 'unavailable' && !error?.message?.includes('offline')) {
+    throw new Error(JSON.stringify(errInfo));
+  }
 };
 
 // Transactions
 export const subscribeToTransactions = (userId: string, callback: (transactions: Transaction[]) => void) => {
-  const q = query(
-    collection(db, 'transactions'), 
-    where('userId', '==', userId),
-    where('deleted_at', '==', null)
-  );
+  const effectiveUserId = auth.currentUser ? auth.currentUser.uid : userId;
+  const q = auth.currentUser 
+    ? query(collection(db, 'transactions'), where('userId', '==', effectiveUserId))
+    : collection(db, 'transactions');
   
   return onSnapshot(q, (snapshot) => {
-    const transactions = snapshot.docs.map(doc => ({
-      id: doc.id as any,
-      ...doc.data()
-    })) as Transaction[];
+    let transactions = snapshot.docs
+      .map(doc => ({ id: doc.id as any, ...doc.data() }))
+      .filter((t: any) => !t.deleted_at && isMatchingUserRecord(t.userId, userId)) as Transaction[];
     
     // Sort transactions by date descending (latest first)
     transactions.sort((a, b) => {
@@ -134,13 +157,14 @@ export const subscribeToTransactions = (userId: string, callback: (transactions:
 
 export const getTransactions = async (userId: string) => {
   try {
-    const q = query(
-      collection(db, 'transactions'),
-      where('userId', '==', userId),
-      where('deleted_at', '==', null)
-    );
+    const effectiveUserId = auth.currentUser ? auth.currentUser.uid : userId;
+    const q = auth.currentUser 
+      ? query(collection(db, 'transactions'), where('userId', '==', effectiveUserId))
+      : collection(db, 'transactions');
     const snapshot = await getDocs(q);
-    const transactions = snapshot.docs.map(doc => ({ id: doc.id as any, ...doc.data() })) as Transaction[];
+    const transactions = snapshot.docs
+      .map(doc => ({ id: doc.id as any, ...doc.data() }))
+      .filter((t: any) => !t.deleted_at && isMatchingUserRecord(t.userId, userId)) as Transaction[];
     
     // Sort transactions by date descending (latest first)
     transactions.sort((a, b) => {
@@ -222,15 +246,16 @@ export const bulkDeleteTransactions = async (ids: string[]) => {
 // Categories
 export const subscribeToCategories = (userId: string | null, callback: (categories: Category[]) => void) => {
   // Fetch both global (userId == null) and user-specific categories
-  const q = query(
-    collection(db, 'categories'),
-    where('deleted_at', '==', null)
-  );
+  const q = collection(db, 'categories');
 
   return onSnapshot(q, (snapshot) => {
     const categories = snapshot.docs
       .map(doc => ({ id: doc.id as any, ...doc.data() } as Category))
-      .filter(cat => cat.userId === null || cat.userId.toString() === userId);
+      .filter(cat => {
+        if (cat.deleted_at) return false;
+        if (cat.userId === null || cat.userId === undefined) return true;
+        return isMatchingUserRecord(cat.userId, userId || '');
+      });
     callback(categories);
   }, (error) => handleFirestoreError(error, 'LIST', 'categories'));
 };
@@ -255,29 +280,172 @@ export const updateCategory = async (id: string, data: Partial<Category>) => {
   }
 };
 
-export const deleteCategory = async (id: string) => {
+export const checkCategoryInUse = async (
+  id: string,
+  categoryName?: string,
+  userId?: string
+): Promise<{ inUse: boolean; count: number; transactions: Transaction[] }> => {
   try {
-    await updateDoc(doc(db, 'categories', id), {
-      deleted_at: serverTimestamp()
+    const effectiveUserId = userId || auth.currentUser?.uid || '';
+    const allTransactions = await getTransactions(effectiveUserId);
+    const targetIdStr = id.toString();
+    const targetName = categoryName?.trim().toLowerCase();
+
+    const matching = allTransactions.filter(t => {
+      const matchId = t.categoryId && t.categoryId.toString() === targetIdStr;
+      const matchName = targetName && t.categoryName && t.categoryName.trim().toLowerCase() === targetName;
+      return matchId || matchName;
     });
-  } catch (error) {
-    handleFirestoreError(error, 'DELETE', `categories/${id}`);
+
+    return {
+      inUse: matching.length > 0,
+      count: matching.length,
+      transactions: matching
+    };
+  } catch (err) {
+    console.error('Error checking category in use:', err);
+    return { inUse: false, count: 0, transactions: [] };
+  }
+};
+
+export const deleteCategory = async (
+  id: string,
+  options?: {
+    reassignTransactionsToUncategorized?: boolean;
+    preventIfInUse?: boolean;
+    userId?: string;
+    categoryName?: string;
+  }
+) => {
+  try {
+    const effectiveUserId = options?.userId || auth.currentUser?.uid || '';
+    
+    // Check if there are related transactions
+    if (effectiveUserId || auth.currentUser) {
+      const allTransactions = await getTransactions(effectiveUserId);
+      const targetIdStr = id.toString();
+      const targetName = options?.categoryName?.trim().toLowerCase();
+
+      const matchingTransactions = allTransactions.filter(t => {
+        const matchId = t.categoryId && t.categoryId.toString() === targetIdStr;
+        const matchName = targetName && t.categoryName && t.categoryName.trim().toLowerCase() === targetName;
+        return matchId || matchName;
+      });
+
+      if (matchingTransactions.length > 0) {
+        if (options?.preventIfInUse && !options?.reassignTransactionsToUncategorized) {
+          throw new Error(`Cannot delete category: Category is currently in use by ${matchingTransactions.length} transaction(s). Please reassign them to 'Uncategorized' to proceed, or keep the category.`);
+        }
+
+        if (options?.reassignTransactionsToUncategorized) {
+          // Update matching transactions in batches to 'Uncategorized'
+          const batchSize = 400;
+          for (let i = 0; i < matchingTransactions.length; i += batchSize) {
+            const chunk = matchingTransactions.slice(i, i + batchSize);
+            const batch = writeBatch(db);
+            chunk.forEach(t => {
+              const transRef = doc(db, 'transactions', t.id.toString());
+              batch.update(transRef, {
+                categoryId: 'uncategorized',
+                categoryName: 'Uncategorized'
+              });
+            });
+            await batch.commit();
+          }
+
+          // Also update recurring transactions if any match
+          try {
+            const rtSnap = await getDocs(
+              auth.currentUser 
+                ? query(collection(db, 'recurring_transactions'), where('userId', '==', auth.currentUser.uid))
+                : collection(db, 'recurring_transactions')
+            );
+            const matchingRT = rtSnap.docs.filter(d => {
+              const data = d.data();
+              return !data.deleted_at && (
+                (data.categoryId && data.categoryId.toString() === targetIdStr) ||
+                (targetName && data.categoryName && data.categoryName.trim().toLowerCase() === targetName)
+              );
+            });
+            if (matchingRT.length > 0) {
+              const rtBatch = writeBatch(db);
+              matchingRT.forEach(d => {
+                rtBatch.update(d.ref, {
+                  categoryId: 'uncategorized',
+                  categoryName: 'Uncategorized'
+                });
+              });
+              await rtBatch.commit();
+            }
+          } catch (rtErr) {
+            console.warn('Notice updating recurring transactions for deleted category:', rtErr);
+          }
+
+          // Also clean up budgets for this category if any match
+          try {
+            const budgetSnap = await getDocs(
+              auth.currentUser 
+                ? query(collection(db, 'budgets'), where('userId', '==', auth.currentUser.uid))
+                : collection(db, 'budgets')
+            );
+            const matchingBudgets = budgetSnap.docs.filter(d => {
+              const data = d.data();
+              return !data.deleted_at && (
+                (data.categoryId && data.categoryId.toString() === targetIdStr) ||
+                (targetName && data.categoryName && data.categoryName.trim().toLowerCase() === targetName)
+              );
+            });
+            if (matchingBudgets.length > 0) {
+              const bBatch = writeBatch(db);
+              matchingBudgets.forEach(d => {
+                bBatch.update(d.ref, {
+                  deleted_at: serverTimestamp()
+                });
+              });
+              await bBatch.commit();
+            }
+          } catch (bErr) {
+            console.warn('Notice updating budgets for deleted category:', bErr);
+          }
+        }
+      }
+    }
+
+    const catRef = doc(db, 'categories', id.toString());
+    try {
+      // First attempt soft delete
+      await updateDoc(catRef, {
+        deleted_at: serverTimestamp()
+      });
+    } catch (softErr) {
+      console.warn('Soft delete for category failed, falling back to deleteDoc:', softErr);
+      await deleteDoc(catRef);
+    }
+    return { success: true };
+  } catch (error: any) {
+    if (error?.message?.includes('Cannot delete category')) {
+      throw error;
+    }
+    try {
+      await deleteDoc(doc(db, 'categories', id.toString()));
+      return { success: true };
+    } catch (hardErr) {
+      handleFirestoreError(hardErr || error, 'DELETE', `categories/${id}`);
+      throw hardErr || error;
+    }
   }
 };
 
 // Budgets
 export const subscribeToBudgets = (userId: string, callback: (budgets: Budget[]) => void) => {
-  const q = query(
-    collection(db, 'budgets'),
-    where('userId', '==', userId),
-    where('deleted_at', '==', null)
-  );
+  const q = auth.currentUser 
+    ? query(collection(db, 'budgets'), where('userId', '==', userId))
+    : collection(db, 'budgets');
 
   return onSnapshot(q, (snapshot) => {
-    const budgets = snapshot.docs.map(doc => ({
-      id: doc.id as any,
-      ...doc.data()
-    })) as Budget[];
+    const budgets = snapshot.docs
+      .map(doc => ({ id: doc.id as any, ...doc.data() } as Budget))
+      .filter((b: any) => !b.deleted_at && isMatchingUserRecord(b.userId, userId));
     callback(budgets);
   }, (error) => handleFirestoreError(error, 'LIST', 'budgets'));
 };
@@ -318,14 +486,14 @@ export const deleteBudget = async (id: string) => {
 
 // Recurring Transactions
 export const subscribeToRecurringTransactions = (userId: string, callback: (data: any[]) => void) => {
-  const q = query(
-    collection(db, 'recurring_transactions'),
-    where('userId', '==', userId),
-    where('deleted_at', '==', null)
-  );
+  const q = auth.currentUser 
+    ? query(collection(db, 'recurring_transactions'), where('userId', '==', userId))
+    : collection(db, 'recurring_transactions');
 
   return onSnapshot(q, (snapshot) => {
-    const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    const data = snapshot.docs
+      .map(doc => ({ id: doc.id, ...doc.data() }))
+      .filter((rt: any) => !rt.deleted_at && isMatchingUserRecord(rt.userId, userId));
     callback(data);
   }, (error) => handleFirestoreError(error, 'LIST', 'recurring_transactions'));
 };
@@ -709,17 +877,14 @@ export const subscribeToAllActivityLogs = (callback: (data: any[]) => void) => {
 
 // Loans & Loan Repayments
 export const subscribeToLoans = (userId: string, callback: (loans: Loan[]) => void) => {
-  const q = query(
-    collection(db, 'loans'),
-    where('userId', '==', userId),
-    where('deleted_at', '==', null)
-  );
+  const q = auth.currentUser 
+    ? query(collection(db, 'loans'), where('userId', '==', userId))
+    : collection(db, 'loans');
   
   return onSnapshot(q, (snapshot) => {
-    const loans = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    })) as Loan[];
+    const loans = snapshot.docs
+      .map(doc => ({ id: doc.id, ...doc.data() }))
+      .filter((l: any) => !l.deleted_at && isMatchingUserRecord(l.userId || l.ownerId, userId)) as Loan[];
     
     // Sort by givenDate descending
     loans.sort((a, b) => new Date(b.givenDate).getTime() - new Date(a.givenDate).getTime());
@@ -760,17 +925,14 @@ export const deleteLoan = async (id: string) => {
 };
 
 export const subscribeToRepayments = (userId: string, callback: (repayments: LoanRepayment[]) => void) => {
-  const q = query(
-    collection(db, 'loan_repayments'),
-    where('userId', '==', userId),
-    where('deleted_at', '==', null)
-  );
+  const q = auth.currentUser 
+    ? query(collection(db, 'loan_repayments'), where('userId', '==', userId))
+    : collection(db, 'loan_repayments');
   
   return onSnapshot(q, (snapshot) => {
-    const repayments = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    })) as LoanRepayment[];
+    const repayments = snapshot.docs
+      .map(doc => ({ id: doc.id, ...doc.data() }))
+      .filter((r: any) => !r.deleted_at && isMatchingUserRecord(r.userId || r.ownerId, userId)) as LoanRepayment[];
     
     // Sort by repaymentDate descending
     repayments.sort((a, b) => new Date(b.repaymentDate).getTime() - new Date(a.repaymentDate).getTime());
@@ -812,18 +974,15 @@ export const deleteRepayment = async (id: string) => {
 
 // --- Clients Management ---
 export const subscribeToClients = (userId: string, callback: (clients: Client[]) => void) => {
-  const q = query(
-    collection(db, 'clients'),
-    where('userId', '==', userId),
-    where('deleted_at', '==', null)
-  );
+  const q = auth.currentUser 
+    ? query(collection(db, 'clients'), where('userId', '==', userId))
+    : collection(db, 'clients');
 
   return onSnapshot(q, (snapshot) => {
-    const clients = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    })) as Client[];
-    clients.sort((a, b) => a.name.localeCompare(b.name));
+    const clients = snapshot.docs
+      .map(doc => ({ id: doc.id, ...doc.data() }))
+      .filter((c: any) => !c.deleted_at && isMatchingUserRecord(c.userId || c.ownerId, userId)) as Client[];
+    clients.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
     callback(clients);
   }, (error) => handleFirestoreError(error, 'LIST', 'clients'));
 };
@@ -995,17 +1154,14 @@ export const deleteClient = async (id: string) => {
 
 // --- Client Ledgers ---
 export const subscribeToClientLedgers = (userId: string, callback: (ledgers: ClientLedger[]) => void) => {
-  const q = query(
-    collection(db, 'client_ledgers'),
-    where('userId', '==', userId),
-    where('deleted_at', '==', null)
-  );
+  const q = auth.currentUser 
+    ? query(collection(db, 'client_ledgers'), where('userId', '==', userId))
+    : collection(db, 'client_ledgers');
 
   return onSnapshot(q, (snapshot) => {
-    const ledgers = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    })) as ClientLedger[];
+    const ledgers = snapshot.docs
+      .map(doc => ({ id: doc.id, ...doc.data() }))
+      .filter((l: any) => !l.deleted_at && isMatchingUserRecord(l.userId || l.ownerId, userId)) as ClientLedger[];
     // Sort by date descending and secondary key
     ledgers.sort((a, b) => {
       const dateDiff = new Date(b.date).getTime() - new Date(a.date).getTime();
@@ -1085,17 +1241,14 @@ export const deleteLedgerEntry = async (id: string) => {
 
 // --- Projects ---
 export const subscribeToProjects = (userId: string, callback: (projects: Project[]) => void) => {
-  const q = query(
-    collection(db, 'projects'),
-    where('userId', '==', userId),
-    where('deleted_at', '==', null)
-  );
+  const q = auth.currentUser 
+    ? query(collection(db, 'projects'), where('userId', '==', userId))
+    : collection(db, 'projects');
 
   return onSnapshot(q, (snapshot) => {
-    const projects = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    })) as Project[];
+    const projects = snapshot.docs
+      .map(doc => ({ id: doc.id, ...doc.data() }))
+      .filter((p: any) => !p.deleted_at && isMatchingUserRecord(p.userId || p.ownerId, userId)) as Project[];
     projects.sort((a, b) => new Date(b.deliveryDate).getTime() - new Date(a.deliveryDate).getTime());
     callback(projects);
   }, (error) => handleFirestoreError(error, 'LIST', 'projects'));
@@ -1356,17 +1509,14 @@ export const deleteProject = async (id: string) => {
 
 // --- Subscriptions ---
 export const subscribeToSubscriptions = (userId: string, callback: (subscriptions: Subscription[]) => void) => {
-  const q = query(
-    collection(db, 'subscriptions'),
-    where('userId', '==', userId),
-    where('deleted_at', '==', null)
-  );
+  const q = auth.currentUser 
+    ? query(collection(db, 'subscriptions'), where('userId', '==', userId))
+    : collection(db, 'subscriptions');
 
   return onSnapshot(q, (snapshot) => {
-    const subscriptions = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    })) as Subscription[];
+    const subscriptions = snapshot.docs
+      .map(doc => ({ id: doc.id, ...doc.data() }))
+      .filter((s: any) => !s.deleted_at && isMatchingUserRecord(s.userId || s.ownerId, userId)) as Subscription[];
     subscriptions.sort((a, b) => new Date(b.renewalDate).getTime() - new Date(a.renewalDate).getTime());
     callback(subscriptions);
   }, (error) => handleFirestoreError(error, 'LIST', 'subscriptions'));
@@ -1484,18 +1634,15 @@ export const deleteSubscription = async (id: string) => {
 
 // --- Products Master Management ---
 export const subscribeToProducts = (ownerId: string, callback: (products: Product[]) => void) => {
-  const q = query(
-    collection(db, 'products'),
-    where('ownerId', '==', ownerId),
-    where('deleted_at', '==', null)
-  );
+  const q = auth.currentUser 
+    ? query(collection(db, 'products'), where('ownerId', '==', ownerId))
+    : collection(db, 'products');
 
   return onSnapshot(q, (snapshot) => {
-    const products = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    })) as Product[];
-    products.sort((a, b) => a.name.localeCompare(b.name));
+    const products = snapshot.docs
+      .map(doc => ({ id: doc.id, ...doc.data() }))
+      .filter((p: any) => !p.deleted_at && isMatchingUserRecord(p.ownerId || p.userId, ownerId)) as Product[];
+    products.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
     callback(products);
   }, (error) => handleFirestoreError(error, 'LIST', 'products'));
 };
@@ -1533,17 +1680,14 @@ export const deleteProduct = async (id: string) => {
 
 // --- Receivables ---
 export const subscribeToReceivables = (userId: string, callback: (receivables: Receivable[]) => void) => {
-  const q = query(
-    collection(db, 'receivables'),
-    where('userId', '==', userId),
-    where('deleted_at', '==', null)
-  );
+  const q = auth.currentUser 
+    ? query(collection(db, 'receivables'), where('userId', '==', userId))
+    : collection(db, 'receivables');
 
   return onSnapshot(q, (snapshot) => {
-    const receivables = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    })) as Receivable[];
+    const receivables = snapshot.docs
+      .map(doc => ({ id: doc.id, ...doc.data() }))
+      .filter((r: any) => !r.deleted_at && isMatchingUserRecord(r.userId || r.ownerId, userId)) as Receivable[];
     receivables.sort((a, b) => new Date(b.dueDate).getTime() - new Date(a.dueDate).getTime());
     callback(receivables);
   }, (error) => handleFirestoreError(error, 'LIST', 'receivables'));
@@ -1618,17 +1762,14 @@ export const deleteReceivable = async (id: string) => {
 
 // --- Payments ---
 export const subscribeToPayments = (userId: string, callback: (payments: PaymentCollection[]) => void) => {
-  const q = query(
-    collection(db, 'payments'),
-    where('userId', '==', userId),
-    where('deleted_at', '==', null)
-  );
+  const q = auth.currentUser 
+    ? query(collection(db, 'payments'), where('userId', '==', userId))
+    : collection(db, 'payments');
 
   return onSnapshot(q, (snapshot) => {
-    const payments = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    })) as PaymentCollection[];
+    const payments = snapshot.docs
+      .map(doc => ({ id: doc.id, ...doc.data() }))
+      .filter((p: any) => !p.deleted_at && isMatchingUserRecord(p.userId || p.ownerId, userId)) as PaymentCollection[];
     payments.sort((a, b) => new Date(b.paymentDate).getTime() - new Date(a.paymentDate).getTime());
     callback(payments);
   }, (error) => handleFirestoreError(error, 'LIST', 'payments'));
@@ -1748,32 +1889,28 @@ export const deletePayment = async (id: string) => {
 
 // --- Quotations Management ---
 export const subscribeToQuotations = (userId: string, callback: (quotations: Quotation[]) => void) => {
-  const q = query(
-    collection(db, 'quotations'),
-    where('ownerId', '==', userId)
-  );
+  const q = auth.currentUser 
+    ? query(collection(db, 'quotations'), where('ownerId', '==', userId))
+    : collection(db, 'quotations');
 
   return onSnapshot(q, (snapshot) => {
-    const quotations = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    })) as Quotation[];
+    const quotations = snapshot.docs
+      .map(doc => ({ id: doc.id, ...doc.data() }))
+      .filter((qDoc: any) => !qDoc.deleted_at && isMatchingUserRecord(qDoc.ownerId || qDoc.userId, userId)) as Quotation[];
     quotations.sort((a, b) => new Date(b.quotationDate).getTime() - new Date(a.quotationDate).getTime());
     callback(quotations);
   }, (error) => handleFirestoreError(error, 'LIST', 'quotations'));
 };
 
 export const subscribeToAllQuotationItems = (userId: string, callback: (items: QuotationItem[]) => void) => {
-  const q = query(
-    collection(db, 'quotation_items'),
-    where('ownerId', '==', userId)
-  );
+  const q = auth.currentUser 
+    ? query(collection(db, 'quotation_items'), where('ownerId', '==', userId))
+    : collection(db, 'quotation_items');
 
   return onSnapshot(q, (snapshot) => {
-    const items = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    })) as QuotationItem[];
+    const items = snapshot.docs
+      .map(doc => ({ id: doc.id, ...doc.data() }))
+      .filter((item: any) => !item.deleted_at && isMatchingUserRecord(item.ownerId || item.userId, userId)) as QuotationItem[];
     callback(items);
   }, (error) => handleFirestoreError(error, 'LIST', 'quotation_items'));
 };

@@ -23,43 +23,49 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
+        const cacheKey = `cached_user_profile_${firebaseUser.uid}`;
+        let userData: User | null = null;
+
         try {
           const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
-          let userData: User;
 
           if (userDoc.exists()) {
             userData = userDoc.data() as User;
           } else {
             // Check if a user with this email was pre-created by an admin
-            const q = query(collection(db, 'users'), where('email', '==', firebaseUser.email));
-            const querySnapshot = await getDocs(q);
-            
-            if (!querySnapshot.empty) {
-              const existingDoc = querySnapshot.docs[0];
-              const existingData = existingDoc.data() as User;
+            try {
+              const q = query(collection(db, 'users'), where('email', '==', firebaseUser.email));
+              const querySnapshot = await getDocs(q);
               
-              userData = {
-                ...existingData,
-                id: firebaseUser.uid as any,
-              };
+              if (!querySnapshot.empty) {
+                const existingDoc = querySnapshot.docs[0];
+                const existingData = existingDoc.data() as User;
+                
+                userData = {
+                  ...existingData,
+                  id: firebaseUser.uid as any,
+                };
 
-              // Create the new doc with UID as key
-              await setDoc(doc(db, 'users', firebaseUser.uid), {
-                ...userData,
-                updated_at: serverTimestamp(),
-              });
+                await setDoc(doc(db, 'users', firebaseUser.uid), {
+                  ...userData,
+                  updated_at: serverTimestamp(),
+                });
 
-              // Delete the temporary pre-created doc if its ID wasn't the UID
-              if (existingDoc.id !== firebaseUser.uid) {
-                await deleteDoc(doc(db, 'users', existingDoc.id));
+                if (existingDoc.id !== firebaseUser.uid) {
+                  await deleteDoc(doc(db, 'users', existingDoc.id));
+                }
               }
-            } else {
+            } catch (queryErr) {
+              console.warn('Could not query admin pre-created users (offline):', queryErr);
+            }
+
+            if (!userData) {
               // Create initial user profile if it doesn't exist
               const isSuperAdmin = firebaseUser.email === 'shshohagh4@gmail.com';
               userData = {
                 id: firebaseUser.uid as any,
                 email: firebaseUser.email || '',
-                name: firebaseUser.displayName || 'User',
+                name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
                 role: isSuperAdmin ? 'SUPER_ADMIN' : 'USER',
                 status: isSuperAdmin ? 'APPROVED' : 'PENDING',
                 currency: 'USD',
@@ -67,15 +73,60 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 permissions: isSuperAdmin ? ['manage_users', 'manage_categories', 'export_data', 'view_admin_panel'] : [],
                 created_at: new Date().toISOString(),
               };
-              await setDoc(doc(db, 'users', firebaseUser.uid), {
-                ...userData,
-                created_at: serverTimestamp(),
-              });
+
+              try {
+                await setDoc(doc(db, 'users', firebaseUser.uid), {
+                  ...userData,
+                  created_at: serverTimestamp(),
+                });
+              } catch (writeErr) {
+                console.warn('Could not save new user profile to Firestore (offline):', writeErr);
+              }
+            }
+          }
+        } catch (error: any) {
+          console.warn('Network/offline notice fetching user profile from Firestore:', error?.message || error);
+          
+          // Fall back to localStorage cached profile
+          const cached = localStorage.getItem(cacheKey);
+          if (cached) {
+            try {
+              userData = JSON.parse(cached);
+            } catch (parseErr) {
+              console.error('Error parsing cached user profile:', parseErr);
             }
           }
 
+          // Fallback offline user profile if no cache is found
+          if (!userData) {
+            const isSuperAdmin = firebaseUser.email === 'shshohagh4@gmail.com';
+            userData = {
+              id: firebaseUser.uid as any,
+              email: firebaseUser.email || '',
+              name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || 'User',
+              role: isSuperAdmin ? 'SUPER_ADMIN' : 'USER',
+              status: 'APPROVED',
+              currency: 'USD',
+              language: 'en',
+              permissions: isSuperAdmin ? ['manage_users', 'manage_categories', 'export_data', 'view_admin_panel'] : [],
+              created_at: new Date().toISOString(),
+            };
+          }
+        }
+
+        if (userData) {
+          try {
+            localStorage.setItem(cacheKey, JSON.stringify(userData));
+          } catch (e) {}
+
+          let token = '';
+          try {
+            token = await firebaseUser.getIdToken();
+          } catch (tokenErr) {
+            console.warn('Could not refresh ID token (offline):', tokenErr);
+          }
+
           if (userData.status === 'APPROVED') {
-            const token = await firebaseUser.getIdToken();
             setState({
               user: userData,
               token,
@@ -92,12 +143,57 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               isPendingApproval: true
             });
           }
-        } catch (error) {
-          console.error('Error fetching user profile:', error);
-          setState(prev => ({ ...prev, isLoading: false }));
+        } else {
+          // Check if local session user exists (for offline or local demo accounts)
+          const localStored = localStorage.getItem('app_local_session_user');
+          if (localStored) {
+            try {
+              const localUser = JSON.parse(localStored) as User;
+              if (localUser && localUser.email) {
+                if (localUser.email === 'shshohagh4@gmail.com') {
+                  localUser.id = 'admin-shshohagh4' as any;
+                  localStorage.setItem('app_local_session_user', JSON.stringify(localUser));
+                }
+                setState({
+                  user: localUser,
+                  token: 'local-session-token',
+                  isAuthenticated: localUser.status === 'APPROVED',
+                  isLoading: false,
+                  isPendingApproval: localUser.status === 'PENDING'
+                });
+                return;
+              }
+            } catch (parseErr) {
+              console.error('Error parsing local stored user session:', parseErr);
+            }
+          }
+          setState({ user: null, token: null, isAuthenticated: false, isLoading: false, isPendingApproval: false });
         }
       } else {
-        setState({ user: null, token: null, isAuthenticated: false, isLoading: false });
+        // Check if local session user exists (for offline or local demo accounts)
+        const localStored = localStorage.getItem('app_local_session_user');
+        if (localStored) {
+          try {
+            const localUser = JSON.parse(localStored) as User;
+            if (localUser && localUser.email) {
+              if (localUser.email === 'shshohagh4@gmail.com') {
+                localUser.id = 'admin-shshohagh4' as any;
+                localStorage.setItem('app_local_session_user', JSON.stringify(localUser));
+              }
+              setState({
+                user: localUser,
+                token: 'local-session-token',
+                isAuthenticated: localUser.status === 'APPROVED',
+                isLoading: false,
+                isPendingApproval: localUser.status === 'PENDING'
+              });
+              return;
+            }
+          } catch (parseErr) {
+            console.error('Error parsing local stored user session:', parseErr);
+          }
+        }
+        setState({ user: null, token: null, isAuthenticated: false, isLoading: false, isPendingApproval: false });
       }
     });
 
@@ -105,26 +201,45 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const login = (token: string, user: User) => {
-    // This is now handled by onAuthStateChanged
-    setState({ user, token, isAuthenticated: true, isLoading: false });
+    try {
+      localStorage.setItem('app_local_session_user', JSON.stringify(user));
+    } catch (e) {}
+    setState({
+      user,
+      token: token || 'local-session-token',
+      isAuthenticated: user.status === 'APPROVED',
+      isLoading: false,
+      isPendingApproval: user.status === 'PENDING'
+    });
   };
 
   const logout = async () => {
-    await signOut(auth);
-    setState({ user: null, token: null, isAuthenticated: false, isLoading: false });
+    try {
+      localStorage.removeItem('app_local_session_user');
+    } catch (e) {}
+    try {
+      await signOut(auth);
+    } catch (e) {}
+    setState({ user: null, token: null, isAuthenticated: false, isLoading: false, isPendingApproval: false });
   };
 
   const updateUser = async (userData: Partial<User>) => {
-    if (state.user && auth.currentUser) {
+    if (state.user) {
+      const updated = { ...state.user, ...userData };
       try {
-        await setDoc(doc(db, 'users', auth.currentUser.uid), userData, { merge: true });
-        setState(prev => ({
-          ...prev,
-          user: { ...prev.user!, ...userData }
-        }));
-      } catch (error) {
-        console.error('Error updating user profile:', error);
+        localStorage.setItem('app_local_session_user', JSON.stringify(updated));
+      } catch (e) {}
+      if (auth.currentUser) {
+        try {
+          await setDoc(doc(db, 'users', auth.currentUser.uid), userData, { merge: true });
+        } catch (error) {
+          console.error('Error updating user profile in Firestore:', error);
+        }
       }
+      setState(prev => ({
+        ...prev,
+        user: updated
+      }));
     }
   };
 

@@ -3,10 +3,13 @@ import { useAuth } from '../contexts/AuthContext';
 import { Transaction, Category } from '../types';
 import { formatDate } from '../lib/utils';
 import { formatCurrency } from '../utils/i18n';
-import { Plus, Trash2, Edit2, Download, Filter, Copy, Upload } from 'lucide-react';
+import { Plus, Trash2, Edit2, Download, Filter, Copy, Upload, Search, X, Check, FileSpreadsheet } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import BankStatementImporter from './BankStatementImporter';
 import { motion, AnimatePresence } from 'motion/react';
 import DeleteConfirmationModal from './DeleteConfirmationModal';
+import AiCategorySuggestionBadge from './AiCategorySuggestionBadge';
+import ExportToast, { ToastData } from './ExportToast';
 import { 
   subscribeToTransactions, 
   subscribeToCategories, 
@@ -19,10 +22,14 @@ import {
 
 export default function Transactions({ 
   shouldOpenNewTransaction, 
-  onOpenNewTransactionComplete 
+  onOpenNewTransactionComplete,
+  targetTransactionId,
+  onClearTargetTransactionId
 }: { 
-  shouldOpenNewTransaction?: boolean, 
-  onOpenNewTransactionComplete?: () => void 
+  shouldOpenNewTransaction?: boolean;
+  onOpenNewTransactionComplete?: () => void;
+  targetTransactionId?: string | null;
+  onClearTargetTransactionId?: () => void;
 }) {
   const { user } = useAuth();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -37,6 +44,10 @@ export default function Transactions({
   const [showBulkDeleteConfirm, setShowBulkDeleteConfirm] = useState(false);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [showImporter, setShowImporter] = useState(false);
+  const [searchFilter, setSearchFilter] = useState('');
+  const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  const [csvExportSuccess, setCsvExportSuccess] = useState(false);
+  const [exportToast, setExportToast] = useState<ToastData | null>(null);
 
   useEffect(() => {
     if (shouldOpenNewTransaction) {
@@ -55,6 +66,36 @@ export default function Transactions({
       }
     }
   }, [shouldOpenNewTransaction, onOpenNewTransactionComplete]);
+
+  // Handle targeting a specific transaction from Ctrl+K search
+  useEffect(() => {
+    if (targetTransactionId && transactions.length > 0) {
+      const found = transactions.find(t => t.id === targetTransactionId);
+      if (found) {
+        setHighlightedId(targetTransactionId);
+        // Ensure filters show this transaction
+        setDateFilter('lifetime');
+        setTypeFilter('ALL');
+        setCategoryFilter('ALL');
+
+        // Scroll to the targeted row
+        setTimeout(() => {
+          const rowEl = document.getElementById(`tx-row-${targetTransactionId}`);
+          if (rowEl) {
+            rowEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }, 150);
+
+        // Clear highlight after a few seconds
+        const timer = setTimeout(() => {
+          setHighlightedId(null);
+          if (onClearTargetTransactionId) onClearTargetTransactionId();
+        }, 4000);
+
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [targetTransactionId, transactions, onClearTargetTransactionId]);
 
   const [dateFilter, setDateFilter] = useState<'today' | 'yesterday' | 'last7' | 'last30' | 'thisWeek' | 'thisMonth' | 'thisYear' | 'lifetime' | 'custom'>('lifetime');
   const [typeFilter, setTypeFilter] = useState<'ALL' | 'INCOME' | 'EXPENSE'>('ALL');
@@ -221,35 +262,6 @@ export default function Transactions({
     }
   };
 
-  const handleExport = (format: 'csv' | 'xlsx') => {
-    // For Firebase, we'll generate the export client-side
-    const dataToExport = filteredTransactions.map(t => ({
-      Date: formatDate(t.date),
-      Category: t.categoryName || 'Unknown',
-      Description: t.description || '',
-      Type: t.type,
-      Status: t.status,
-      Amount: t.amount
-    }));
-
-    if (format === 'csv') {
-      const headers = Object.keys(dataToExport[0]).join(',');
-      const rows = dataToExport.map(row => Object.values(row).join(','));
-      const csvContent = [headers, ...rows].join('\n');
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.setAttribute('href', url);
-      link.setAttribute('download', `transactions.csv`);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    } else {
-      // For XLSX, we'd need a library like 'xlsx'
-      alert('Excel export requires additional libraries. Please use CSV for now.');
-    }
-  };
-
   const filteredCategories = categories.filter(c => c.type === formData.type);
   const lang = user?.language || 'en';
   const currency = user?.currency || 'USD';
@@ -281,6 +293,17 @@ export default function Transactions({
 
     if (!matchesType || !matchesCategory) return false;
 
+    if (searchFilter.trim()) {
+      const q = searchFilter.toLowerCase().trim();
+      const descMatch = (t.description || '').toLowerCase().includes(q);
+      const catMatch = ((t as any).categoryName || '').toLowerCase().includes(q);
+      const amtMatch = String(t.amount).includes(q);
+      const dateMatch = (t.date || '').includes(q);
+      if (!descMatch && !catMatch && !amtMatch && !dateMatch) {
+        return false;
+      }
+    }
+
     switch (dateFilter) {
       case 'today':
         return t.date === todayStr;
@@ -305,6 +328,99 @@ export default function Transactions({
     }
   });
 
+  const handleExport = (format: 'csv' | 'xlsx') => {
+    if (filteredTransactions.length === 0) {
+      alert('No transactions match the current filter to export.');
+      return;
+    }
+
+    const escapeCSV = (val: any): string => {
+      if (val === null || val === undefined) return '""';
+      const str = String(val).replace(/"/g, '""');
+      return `"${str}"`;
+    };
+
+    const dateTag = dateFilter === 'custom' && customDateRange.start && customDateRange.end
+      ? `${customDateRange.start}_to_${customDateRange.end}`
+      : `${dateFilter}_${new Date().toISOString().split('T')[0]}`;
+
+    if (format === 'csv') {
+      const headers = [
+        'Date',
+        'Transaction ID',
+        'Type',
+        'Category',
+        'Description',
+        'Amount',
+        'Currency',
+        'Status'
+      ];
+
+      const rows = filteredTransactions.map(t => [
+        escapeCSV(t.date),
+        escapeCSV(t.id || ''),
+        escapeCSV(t.type),
+        escapeCSV(t.categoryName || 'Unknown'),
+        escapeCSV(t.description || ''),
+        t.amount.toFixed(2),
+        escapeCSV(currency),
+        escapeCSV(t.status || 'ACTIVE')
+      ].join(','));
+
+      const csvContent = '\uFEFF' + [headers.join(','), ...rows].join('\r\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const fileName = `transactions_${dateTag}.csv`;
+      link.setAttribute('href', url);
+      link.setAttribute('download', fileName);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+
+      setCsvExportSuccess(true);
+      setTimeout(() => setCsvExportSuccess(false), 3000);
+
+      setExportToast({
+        id: `toast-${Date.now()}`,
+        title: 'CSV Export Successful',
+        message: `Your filtered transactions have been downloaded to your device.`,
+        fileName,
+        recordCount: filteredTransactions.length,
+        type: 'success'
+      });
+    } else {
+      // Native XLSX export using the xlsx library
+      const fileName = `transactions_${dateTag}.xlsx`;
+      const rows = filteredTransactions.map(t => ({
+        'Date': t.date,
+        'Transaction ID': t.id || '',
+        'Type': t.type,
+        'Category': t.categoryName || 'Unknown',
+        'Description': t.description || '',
+        'Amount': t.amount,
+        'Currency': currency,
+        'Status': t.status || 'ACTIVE'
+      }));
+
+      const worksheet = XLSX.utils.json_to_sheet(rows);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Transactions');
+      XLSX.writeFile(workbook, fileName);
+
+      setExportToast({
+        id: `toast-${Date.now()}`,
+        title: 'Excel Export Successful',
+        message: `Your filtered transactions have been downloaded to your device.`,
+        fileName,
+        recordCount: filteredTransactions.length,
+        type: 'success'
+      });
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -320,16 +436,35 @@ export default function Transactions({
             <Upload size={16} /> Import
           </button>
           <button 
+            id="transactions-export-csv-btn"
             onClick={() => handleExport('csv')}
-            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
+            disabled={filteredTransactions.length === 0}
+            className={`inline-flex items-center gap-2 px-3.5 py-2 text-sm font-semibold rounded-xl border transition-all cursor-pointer ${
+              csvExportSuccess
+                ? 'bg-emerald-50 dark:bg-emerald-950/60 border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300'
+                : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700 shadow-xs disabled:opacity-40 disabled:cursor-not-allowed'
+            }`}
+            title={`Export ${filteredTransactions.length} filtered transaction${filteredTransactions.length === 1 ? '' : 's'} as CSV`}
           >
-            <Download size={16} /> CSV
+            {csvExportSuccess ? (
+              <>
+                <Check size={16} className="text-emerald-600 dark:text-emerald-400" />
+                <span>CSV Exported</span>
+              </>
+            ) : (
+              <>
+                <Download size={16} />
+                <span>Export CSV ({filteredTransactions.length})</span>
+              </>
+            )}
           </button>
           <button 
             onClick={() => handleExport('xlsx')}
-            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
+            disabled={filteredTransactions.length === 0}
+            className="hidden sm:inline-flex items-center gap-2 px-3.5 py-2 text-sm font-medium bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed text-zinc-700 dark:text-zinc-300 shadow-xs"
+            title="Export filtered transactions as Excel (.xlsx)"
           >
-            <Download size={16} /> Excel
+            <FileSpreadsheet size={16} /> Excel
           </button>
           <button 
             onClick={() => {
@@ -352,7 +487,28 @@ export default function Transactions({
       </div>
 
       <div className="flex flex-wrap items-center gap-3 p-4 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
-        <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground mr-2">
+        {/* Search text filter */}
+        <div className="relative flex-1 min-w-[200px] max-w-xs">
+          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+          <input
+            type="text"
+            value={searchFilter}
+            onChange={(e) => setSearchFilter(e.target.value)}
+            placeholder="Search description, category..."
+            className="w-full pl-9 pr-8 py-1.5 text-sm bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-800 rounded-lg focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100 text-zinc-900 dark:text-zinc-100 placeholder-zinc-400"
+          />
+          {searchFilter && (
+            <button
+              type="button"
+              onClick={() => setSearchFilter('')}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground mr-1">
           <Filter size={16} /> Filter:
         </div>
         <select
@@ -464,8 +620,20 @@ export default function Transactions({
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
-              {filteredTransactions.map((t) => (
-                <tr key={t.id} className={`hover:bg-zinc-50/50 dark:hover:bg-zinc-800/50 transition-colors ${t.status === 'INACTIVE' ? 'opacity-50 grayscale-[0.5]' : ''} ${selectedIds.includes(t.id as string) ? 'bg-zinc-50 dark:bg-zinc-800/50' : ''}`}>
+              {filteredTransactions.map((t) => {
+                const isTargetHighlighted = highlightedId === t.id;
+                return (
+                  <tr 
+                    key={t.id} 
+                    id={`tx-row-${t.id}`}
+                    className={`transition-all duration-500 ${
+                      isTargetHighlighted
+                        ? 'bg-amber-100/90 dark:bg-amber-950/70 ring-2 ring-amber-500'
+                        : selectedIds.includes(t.id as string)
+                          ? 'bg-zinc-50 dark:bg-zinc-800/50'
+                          : 'hover:bg-zinc-50/50 dark:hover:bg-zinc-800/50'
+                    } ${t.status === 'INACTIVE' ? 'opacity-50 grayscale-[0.5]' : ''}`}
+                  >
                   <td className="px-6 py-4">
                     <input 
                       type="checkbox" 
@@ -528,7 +696,8 @@ export default function Transactions({
                     </div>
                   </td>
                 </tr>
-              ))}
+              );
+            })}
               {transactions.length === 0 && !loading && (
                 <tr>
                   <td colSpan={6} className="px-6 py-12 text-center text-muted-foreground">
@@ -655,6 +824,15 @@ export default function Transactions({
                     onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                     className="w-full px-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100"
                     rows={2}
+                    placeholder="e.g. Uber ride to client meeting, AWS bill, Coffee with team..."
+                  />
+                  <AiCategorySuggestionBadge
+                    description={formData.description}
+                    type={formData.type}
+                    categories={categories}
+                    currentCategoryId={formData.categoryId}
+                    onSelectCategory={(catId) => setFormData(prev => ({ ...prev, categoryId: catId }))}
+                    userId={user?.id?.toString()}
                   />
                 </div>
 
@@ -690,6 +868,12 @@ export default function Transactions({
           </div>
         )}
       </AnimatePresence>
+
+      {/* Export Toast Notification */}
+      <ExportToast 
+        toast={exportToast} 
+        onClose={() => setExportToast(null)} 
+      />
     </div>
   );
 }

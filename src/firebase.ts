@@ -1,10 +1,38 @@
-import { initializeApp } from 'firebase/app';
+import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { 
+  initializeFirestore, 
+  persistentLocalCache, 
+  persistentMultipleTabManager,
+  getFirestore,
+  Firestore,
+  enableNetwork,
+  disableNetwork
+} from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
-const app = initializeApp(firebaseConfig);
+const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 export const auth = getAuth(app);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 
+const databaseId = (firebaseConfig as any).firestoreDatabaseId || '(default)';
+
+// Initialize Firestore with robust multi-tab IndexedDB offline persistence
+let firestoreDb: Firestore;
+if (typeof window !== 'undefined') {
+  try {
+    firestoreDb = initializeFirestore(app, {
+      localCache: persistentLocalCache({
+        tabManager: persistentMultipleTabManager()
+      })
+    }, databaseId);
+  } catch (err) {
+    // Fallback if already initialized (e.g. Vite HMR)
+    firestoreDb = getFirestore(app, databaseId);
+  }
+} else {
+  firestoreDb = getFirestore(app, databaseId);
+}
+
+export const db = firestoreDb;
+export { enableNetwork, disableNetwork };
 export default app;

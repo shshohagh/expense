@@ -10,13 +10,13 @@ import Profile from './components/Profile';
 import UserActivity from './components/UserActivity';
 import Reports from './components/Reports';
 import Ledger from './components/Ledger';
-import BudgetManagement from './components/BudgetManagement';
 import Settings from './components/Settings';
-import Loans from './components/Loans';
-import ClientReceivables from './components/ClientReceivables';
 import Quotations from './components/Quotations';
-import BorrowerManagement from './components/BorrowerManagement';
 import PublicQuotationView from './components/PublicQuotationView';
+import CommandPalette, { AppView } from './components/CommandPalette';
+import TopBalanceSparkline from './components/TopBalanceSparkline';
+import AiInsightsModule from './components/AiInsightsModule';
+import OfflineSyncBanner, { OfflineStatusBadge } from './components/OfflineSyncBanner';
 import { Transaction } from './types';
 import { subscribeToTransactions, getTransactions, processRecurringTransactions } from './services/firestoreService';
 import { t, formatCurrency } from './utils/i18n';
@@ -33,18 +33,18 @@ import {
   History,
   FileText,
   Wallet as WalletIcon,
-  Target,
   ChevronLeft,
   ChevronRight,
   Sun,
   Moon,
   Settings as SettingsIcon,
   BookOpen,
-  Coins
+  Search,
+  Sparkles
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
-type View = 'dashboard' | 'transactions' | 'loans' | 'borrowers' | 'client_receivables' | 'quotations' | 'admin' | 'profile' | 'categories' | 'recurring' | 'activity' | 'reports' | 'ledger' | 'monthly_cash_flow' | 'annual_breakdown' | 'budgets' | 'settings';
+type View = AppView;
 
 export default function App() {
   const { isAuthenticated, isLoading, user, logout } = useAuth();
@@ -52,6 +52,8 @@ export default function App() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [currentView, setCurrentView] = useState<View>('dashboard');
   const [shouldOpenNewTransaction, setShouldOpenNewTransaction] = useState(false);
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const [targetTransactionId, setTargetTransactionId] = useState<string | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -63,6 +65,103 @@ export default function App() {
   const [openMenus, setOpenMenus] = useState<Set<string>>(new Set());
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  
+  // Resizable sidebar settings (200px - 400px)
+  const MIN_SIDEBAR_WIDTH = 200;
+  const MAX_SIDEBAR_WIDTH = 400;
+  const DEFAULT_SIDEBAR_WIDTH = 256;
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('sidebar_width');
+      if (stored) {
+        const val = parseInt(stored, 10);
+        if (!isNaN(val) && val >= MIN_SIDEBAR_WIDTH && val <= MAX_SIDEBAR_WIDTH) {
+          return val;
+        }
+      }
+    }
+    return DEFAULT_SIDEBAR_WIDTH;
+  });
+  const [isResizingSidebar, setIsResizingSidebar] = useState(false);
+  const [isDesktop, setIsDesktop] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return window.innerWidth >= 1024;
+    }
+    return true;
+  });
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsDesktop(window.innerWidth >= 1024);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  const handleMouseDownResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (isSidebarCollapsed) {
+      setIsSidebarCollapsed(false);
+    }
+    setIsResizingSidebar(true);
+  };
+
+  const handleTouchStartResize = () => {
+    if (isSidebarCollapsed) {
+      setIsSidebarCollapsed(false);
+    }
+    setIsResizingSidebar(true);
+  };
+
+  useEffect(() => {
+    if (!isResizingSidebar) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const newWidth = Math.max(MIN_SIDEBAR_WIDTH, Math.min(MAX_SIDEBAR_WIDTH, e.clientX));
+      setSidebarWidth(newWidth);
+    };
+
+    const handleMouseUp = () => {
+      setIsResizingSidebar(false);
+      setSidebarWidth((current) => {
+        localStorage.setItem('sidebar_width', current.toString());
+        return current;
+      });
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      if (e.touches.length > 0) {
+        const touchX = e.touches[0].clientX;
+        const newWidth = Math.max(MIN_SIDEBAR_WIDTH, Math.min(MAX_SIDEBAR_WIDTH, touchX));
+        setSidebarWidth(newWidth);
+      }
+    };
+
+    const handleTouchEnd = () => {
+      setIsResizingSidebar(false);
+      setSidebarWidth((current) => {
+        localStorage.setItem('sidebar_width', current.toString());
+        return current;
+      });
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
+    document.addEventListener('touchmove', handleTouchMove);
+    document.addEventListener('touchend', handleTouchEnd);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.removeEventListener('touchmove', handleTouchMove);
+      document.removeEventListener('touchend', handleTouchEnd);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+  }, [isResizingSidebar]);
+
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     if (typeof window !== 'undefined') {
       return (localStorage.getItem('theme') as 'light' | 'dark') || 'light';
@@ -78,12 +177,9 @@ export default function App() {
 
   const navItems = React.useMemo(() => [
     { id: 'dashboard', label: t('dashboard', lang), icon: LayoutDashboard },
+    { id: 'ai_insights', label: 'AI Insights', icon: Sparkles },
     { id: 'transactions', label: t('transactions', lang), icon: Receipt },
-    { id: 'client_receivables', label: 'Client Receivables', icon: Users },
     { id: 'quotations', label: 'Quotations', icon: FileText },
-    { id: 'borrowers', label: 'Borrowers', icon: Users },
-    { id: 'loans', label: 'Loans', icon: Coins },
-    { id: 'budgets', label: t('budgets', lang), icon: Target },
     { 
       id: 'reports', 
       label: t('reports', lang), 
@@ -172,10 +268,10 @@ export default function App() {
         setCurrentView('transactions');
         setShouldOpenNewTransaction(true);
       }
-      // Ctrl+K placeholder for Search
+      // Ctrl+K placeholder for Search -> opens Command Palette
       if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
         e.preventDefault();
-        console.log('Search functionality not implemented');
+        setIsCommandPaletteOpen(prev => !prev);
       }
 
       // Alt + 1-9 shortcuts
@@ -237,33 +333,33 @@ export default function App() {
           >
             {isMobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
           </button>
-          <div className="flex items-center gap-3 text-zinc-900 dark:text-white">
-            <button 
-              onClick={handleTopWalletClick}
-              className="w-8 h-8 bg-zinc-900 dark:bg-white rounded-lg flex items-center justify-center text-white dark:text-zinc-900 hover:scale-105 active:scale-95 transition-transform shadow-sm"
-              title="Click to see balance"
-            >
-              <WalletIcon size={20} />
-            </button>
-            <div className="flex flex-col">
-              <span className="font-bold text-xl tracking-tight hidden sm:block leading-none">Expensy</span>
-              <AnimatePresence>
-                {showTopBalance && topBalance !== null && (
-                  <motion.span 
-                    initial={{ opacity: 0, y: -5 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -5 }}
-                    className="text-[10px] font-bold text-emerald-500 dark:text-emerald-400 leading-none mt-1"
-                  >
-                    {formatCurrency(topBalance, currency, lang)}
-                  </motion.span>
-                )}
-              </AnimatePresence>
-            </div>
-          </div>
+          <TopBalanceSparkline
+            transactions={transactions}
+            currency={currency}
+            lang={lang}
+            onNavigateToTransactions={() => setCurrentView('transactions')}
+          />
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2 sm:gap-4">
+          {/* Quick Command Palette Search Button */}
+          <button
+            type="button"
+            onClick={() => setIsCommandPaletteOpen(true)}
+            className="flex items-center gap-2 px-3 py-1.5 bg-zinc-100 hover:bg-zinc-200/80 dark:bg-zinc-800 dark:hover:bg-zinc-700/80 text-zinc-600 dark:text-zinc-300 rounded-xl text-xs font-medium border border-zinc-200/80 dark:border-zinc-700/60 transition-all cursor-pointer shadow-xs max-w-[210px] sm:max-w-xs"
+            title="Search views & transactions (Ctrl+K / ⌘K)"
+          >
+            <Search size={14} className="shrink-0 text-zinc-400" />
+            <span className="truncate hidden sm:inline">Search (Ctrl+K)...</span>
+            <span className="truncate sm:hidden">Search</span>
+            <kbd className="hidden sm:inline-flex items-center gap-0.5 ml-auto px-1.5 py-0.5 text-[10px] font-mono font-semibold rounded bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400">
+              Ctrl K
+            </kbd>
+          </button>
+
+          {/* Firestore Offline Persistence Status */}
+          <OfflineStatusBadge />
+
           <button
             onClick={toggleTheme}
             className="p-2 text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl transition-colors"
@@ -283,10 +379,18 @@ export default function App() {
         </div>
       </header>
 
+      {/* Offline Sync Banner */}
+      <div className="fixed top-16 left-0 right-0 z-40">
+        <OfflineSyncBanner />
+      </div>
+
       {/* Sidebar - Desktop */}
       <aside 
-        className={`fixed left-0 top-16 bottom-0 bg-white dark:bg-zinc-900 border-r border-zinc-200 dark:border-zinc-800 hidden lg:flex flex-col z-40 transition-all duration-300 ${
-          isSidebarCollapsed ? 'w-20' : 'w-64'
+        style={{
+          width: isSidebarCollapsed ? 80 : sidebarWidth,
+        }}
+        className={`fixed left-0 top-16 bottom-0 bg-white dark:bg-zinc-900 border-r border-zinc-200 dark:border-zinc-800 hidden lg:flex flex-col z-40 relative ${
+          isResizingSidebar ? 'select-none transition-none' : 'transition-all duration-300'
         }`}
       >
         <nav className="flex-1 px-3 py-6 space-y-1 overflow-y-auto scrollbar-hide">
@@ -363,6 +467,45 @@ export default function App() {
             {isSidebarCollapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
           </button>
         </div>
+
+        {/* Drag Resizer Handle on the Right Edge */}
+        {!isSidebarCollapsed && (
+          <div
+            onMouseDown={handleMouseDownResize}
+            onTouchStart={handleTouchStartResize}
+            onDoubleClick={() => {
+              setSidebarWidth(DEFAULT_SIDEBAR_WIDTH);
+              localStorage.setItem('sidebar_width', DEFAULT_SIDEBAR_WIDTH.toString());
+            }}
+            title="Drag to resize sidebar (200px - 400px). Double click to reset."
+            className={`absolute top-0 right-0 bottom-0 w-3 -mr-1.5 cursor-col-resize z-50 group flex items-center justify-center transition-colors select-none ${
+              isResizingSidebar ? 'bg-blue-500/20' : 'hover:bg-blue-500/10'
+            }`}
+          >
+            {/* Visual line and grip pill */}
+            <div
+              className={`w-0.5 h-full transition-colors ${
+                isResizingSidebar
+                  ? 'bg-blue-600 dark:bg-blue-400'
+                  : 'bg-transparent group-hover:bg-blue-500/60 dark:group-hover:bg-blue-400/60'
+              }`}
+            />
+            <div
+              className={`absolute top-1/2 -translate-y-1/2 w-1.5 h-8 rounded-full transition-all ${
+                isResizingSidebar
+                  ? 'bg-blue-600 dark:bg-blue-400 shadow-sm opacity-100 scale-110'
+                  : 'bg-zinc-400 dark:bg-zinc-600 opacity-0 group-hover:opacity-100 group-hover:scale-100'
+              }`}
+            />
+
+            {/* Live Width Badge while resizing */}
+            {isResizingSidebar && (
+              <div className="absolute top-4 left-4 pointer-events-none px-2 py-0.5 rounded-md bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 text-[11px] font-mono font-semibold shadow-lg whitespace-nowrap z-50">
+                {Math.round(sidebarWidth)}px
+              </div>
+            )}
+          </div>
+        )}
       </aside>
 
       {/* Mobile Menu Overlay */}
@@ -443,9 +586,12 @@ export default function App() {
 
       {/* Main Content */}
       <main 
-        className={`transition-all duration-300 pt-16 min-h-screen ${
-          isSidebarCollapsed ? 'lg:ml-20' : 'lg:ml-64'
-        }`}
+        style={{
+          marginLeft: isDesktop ? (isSidebarCollapsed ? 80 : sidebarWidth) : 0,
+        }}
+        className={`${
+          isResizingSidebar ? 'transition-none' : 'transition-all duration-300'
+        } pt-16 min-h-screen`}
       >
         <div className="p-4 lg:p-8 max-w-6xl mx-auto">
           <AnimatePresence mode="wait">
@@ -457,16 +603,21 @@ export default function App() {
               transition={{ duration: 0.2 }}
             >
               {currentView === 'dashboard' && <Dashboard />}
+              {currentView === 'ai_insights' && (
+                <AiInsightsModule 
+                  transactions={transactions} 
+                  onNavigateToTransactions={() => setCurrentView('transactions')} 
+                />
+              )}
               {currentView === 'transactions' && (
                 <Transactions 
                   shouldOpenNewTransaction={shouldOpenNewTransaction} 
                   onOpenNewTransactionComplete={() => setShouldOpenNewTransaction(false)} 
+                  targetTransactionId={targetTransactionId}
+                  onClearTargetTransactionId={() => setTargetTransactionId(null)}
                 />
               )}
-              {currentView === 'client_receivables' && <ClientReceivables />}
               {currentView === 'quotations' && <Quotations />}
-              {currentView === 'borrowers' && <BorrowerManagement />}
-              {currentView === 'loans' && <Loans />}
               {currentView === 'recurring' && <RecurringTransactions />}
               {currentView === 'ledger' && <Ledger transactions={transactions} currency={currency} lang={lang} />}
               {currentView === 'monthly_cash_flow' && <Reports focusedReport="monthly" />}
@@ -476,12 +627,36 @@ export default function App() {
               {currentView === 'profile' && <Profile />}
               {currentView === 'activity' && <UserActivity />}
               {currentView === 'reports' && <Reports />}
-              {currentView === 'budgets' && <BudgetManagement />}
               {currentView === 'settings' && <Settings />}
             </motion.div>
           </AnimatePresence>
         </div>
       </main>
+
+      {/* Ctrl+K Command Palette Modal */}
+      <CommandPalette
+        isOpen={isCommandPaletteOpen}
+        onClose={() => setIsCommandPaletteOpen(false)}
+        onNavigate={(view) => {
+          setCurrentView(view);
+        }}
+        onSelectTransaction={(transaction) => {
+          setTargetTransactionId(transaction.id as string);
+          setCurrentView('transactions');
+        }}
+        onNewTransaction={() => {
+          setCurrentView('transactions');
+          setShouldOpenNewTransaction(true);
+        }}
+        onToggleTheme={toggleTheme}
+        onShowBalance={handleTopWalletClick}
+        theme={theme}
+        transactions={transactions}
+        currency={currency}
+        lang={lang}
+        userRole={user?.role}
+        userPermissions={user?.permissions}
+      />
     </div>
   );
 }

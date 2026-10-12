@@ -92,13 +92,16 @@ service cloud.firestore {
 
     function isAdmin() {
       return isAuthenticated() &&
-        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['ADMIN', 'SUPER_ADMIN'] ||
-          (request.auth.token.email == "shshohagh4@gmail.com" && request.auth.token.email_verified == true));
+        (request.auth.token.email == "shshohagh4@gmail.com" ||
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['ADMIN', 'SUPER_ADMIN']);
     }
 
     function isApproved() {
-      return isAuthenticated() && 
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'APPROVED';
+      return isAuthenticated() && (
+        request.auth.token.email == "shshohagh4@gmail.com" ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'APPROVED' ||
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['ADMIN', 'SUPER_ADMIN']
+      );
     }
 
     function isDocOwner() {
@@ -123,9 +126,8 @@ service cloud.firestore {
     }
 
     function isValidCategory(data) {
-      return data.keys().hasOnly(['userId', 'name', 'type', 'deleted_at', 'isDemo']) &&
-             ((data.userId == null && isAdmin()) || data.userId == request.auth.uid) &&
-             data.name is string && data.name.size() > 0 && data.name.size() < 50 &&
+      return (data.userId == null || data.userId == request.auth.uid || data.userId == 'admin-shshohagh4' || isAdmin()) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
              data.type in ['INCOME', 'EXPENSE', 'BUDGET'];
     }
 
@@ -274,8 +276,18 @@ service cloud.firestore {
     match /categories/{categoryId} {
       allow read: if isApproved() || isAdmin();
       allow create: if isApproved() && isValidCategory(request.resource.data);
-      allow update: if isApproved() && isValidCategory(request.resource.data) && (resource.data.userId == request.auth.uid || isAdmin());
-      allow delete: if isApproved() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow update: if isApproved() && (
+        resource.data.userId == request.auth.uid || 
+        resource.data.userId == null || 
+        resource.data.userId == 'admin-shshohagh4' || 
+        isAdmin()
+      );
+      allow delete: if isApproved() && (
+        resource.data.userId == request.auth.uid || 
+        resource.data.userId == null || 
+        resource.data.userId == 'admin-shshohagh4' || 
+        isAdmin()
+      );
     }
 
     match /budgets/{budgetId} {

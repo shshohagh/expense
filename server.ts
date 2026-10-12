@@ -6,11 +6,106 @@ import bcrypt from "bcryptjs";
 import db from "./src/db.js";
 import { fileURLToPath } from "url";
 import * as xlsx from "xlsx";
+import { GoogleGenAI, Type } from "@google/genai";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const JWT_SECRET = process.env.JWT_SECRET || "super-secret-key";
+
+let genAIClient: GoogleGenAI | null = null;
+const getGenAI = () => {
+  if (!genAIClient && process.env.GEMINI_API_KEY) {
+    genAIClient = new GoogleGenAI({
+      apiKey: process.env.GEMINI_API_KEY,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        }
+      }
+    });
+  }
+  return genAIClient;
+};
+
+// Heuristic fallback for category suggestion if AI service is offline
+function fallbackSuggestCategory(description: string, type: string = 'EXPENSE', categories: any[] = []) {
+  const descLower = description.toLowerCase().trim();
+  
+  // Try matching existing categories first
+  if (categories && categories.length > 0) {
+    for (const cat of categories) {
+      if (cat.name && descLower.includes(cat.name.toLowerCase())) {
+        return {
+          suggestedCategoryId: cat.id ? String(cat.id) : null,
+          suggestedCategoryName: cat.name,
+          confidence: "HIGH",
+          reasoning: `Description contains "${cat.name}".`,
+          isNewCategory: false,
+          aiPowered: false
+        };
+      }
+    }
+  }
+
+  // Keyword rules
+  const keywords: { [key: string]: { name: string; type: string } } = {
+    uber: { name: "Transportation", type: "EXPENSE" },
+    lyft: { name: "Transportation", type: "EXPENSE" },
+    taxi: { name: "Transportation", type: "EXPENSE" },
+    gas: { name: "Fuel & Vehicle", type: "EXPENSE" },
+    petrol: { name: "Fuel & Vehicle", type: "EXPENSE" },
+    shell: { name: "Fuel & Vehicle", type: "EXPENSE" },
+    starbucks: { name: "Food & Dining", type: "EXPENSE" },
+    restaurant: { name: "Food & Dining", type: "EXPENSE" },
+    cafe: { name: "Food & Dining", type: "EXPENSE" },
+    mcdonald: { name: "Food & Dining", type: "EXPENSE" },
+    pizza: { name: "Food & Dining", type: "EXPENSE" },
+    grocery: { name: "Groceries", type: "EXPENSE" },
+    walmart: { name: "Groceries", type: "EXPENSE" },
+    supermarket: { name: "Groceries", type: "EXPENSE" },
+    aws: { name: "Software & Cloud Services", type: "EXPENSE" },
+    github: { name: "Software & Cloud Services", type: "EXPENSE" },
+    cloud: { name: "Software & Cloud Services", type: "EXPENSE" },
+    google: { name: "Software & Subscriptions", type: "EXPENSE" },
+    netflix: { name: "Entertainment & Subscriptions", type: "EXPENSE" },
+    spotify: { name: "Entertainment & Subscriptions", type: "EXPENSE" },
+    salary: { name: "Salary & Wages", type: "INCOME" },
+    paycheck: { name: "Salary & Wages", type: "INCOME" },
+    freelance: { name: "Freelance Income", type: "INCOME" },
+    client: { name: "Client Revenue", type: "INCOME" },
+    rent: { name: "Housing & Rent", type: "EXPENSE" },
+    mortgage: { name: "Housing & Rent", type: "EXPENSE" },
+    electric: { name: "Utilities", type: "EXPENSE" },
+    water: { name: "Utilities", type: "EXPENSE" },
+    internet: { name: "Utilities", type: "EXPENSE" },
+    wifi: { name: "Utilities", type: "EXPENSE" },
+  };
+
+  for (const [kw, info] of Object.entries(keywords)) {
+    if (descLower.includes(kw)) {
+      // Find matching existing category
+      const match = categories.find(c => c.name.toLowerCase().includes(info.name.toLowerCase()));
+      return {
+        suggestedCategoryId: match ? String(match.id) : null,
+        suggestedCategoryName: match ? match.name : info.name,
+        confidence: "MEDIUM",
+        reasoning: `Recognized merchant/keyword "${kw}".`,
+        isNewCategory: !match,
+        aiPowered: false
+      };
+    }
+  }
+
+  return {
+    suggestedCategoryId: null,
+    suggestedCategoryName: type === 'INCOME' ? 'General Income' : 'General Expense',
+    confidence: "LOW",
+    reasoning: "No specific keyword match found.",
+    isNewCategory: true,
+    aiPowered: false
+  };
+}
 
 async function startServer() {
   const app = express();
@@ -436,11 +531,530 @@ async function startServer() {
 
   app.delete("/api/categories/:id", authenticateToken, (req: any, res) => {
     try {
+      const { reassign } = req.query;
+      const countResult: any = db.prepare("SELECT COUNT(*) as count FROM transactions WHERE categoryId = ? AND deleted_at IS NULL").get(req.params.id);
+      const inUseCount = countResult?.count || 0;
+
+      if (inUseCount > 0 && reassign !== 'true') {
+        return res.status(400).json({ 
+          error: `Category is currently in use by ${inUseCount} transaction(s). Reassign them to 'Uncategorized' to proceed, or keep the category.`,
+          inUseCount 
+        });
+      }
+
+      if (inUseCount > 0 && reassign === 'true') {
+        db.prepare("UPDATE transactions SET categoryId = NULL WHERE categoryId = ?").run(req.params.id);
+        db.prepare("UPDATE recurring_transactions SET categoryId = NULL WHERE categoryId = ?").run(req.params.id);
+        db.prepare("DELETE FROM budgets WHERE categoryId = ?").run(req.params.id);
+      }
+
       db.prepare("UPDATE categories SET deleted_at = CURRENT_TIMESTAMP WHERE id = ? AND (userId = ? OR ? = 'SUPER_ADMIN')").run(req.params.id, req.user.id, req.user.role);
-      logActivity(req.user.id, req.user.email, 'DELETE_CATEGORY', `Deleted category #${req.params.id}`);
-      res.json({ message: "Category deleted" });
+      logActivity(req.user.id, req.user.email, 'DELETE_CATEGORY', `Deleted category #${req.params.id}${inUseCount > 0 ? ` (${inUseCount} transactions set to Uncategorized)` : ''}`);
+      res.json({ message: "Category deleted", inUseCount, reassigned: inUseCount > 0 });
     } catch (error: any) {
       res.status(400).json({ error: error.message });
+    }
+  });
+
+  // --- AI Category Suggestion Endpoints ---
+  app.post("/api/ai/suggest-category", authenticateToken, async (req: any, res) => {
+    const { description, type, categories } = req.body;
+
+    if (!description || typeof description !== 'string' || !description.trim()) {
+      return res.status(400).json({ error: "Description is required for category suggestion" });
+    }
+
+    const availableCategories = categories || db.prepare("SELECT id, name, type FROM categories WHERE (userId IS NULL OR userId = ?) AND deleted_at IS NULL").all(req.user.id);
+    const ai = getGenAI();
+
+    if (ai) {
+      try {
+        const categoryOptions = availableCategories.map((c: any) => ({
+          id: String(c.id),
+          name: c.name,
+          type: c.type || 'EXPENSE'
+        }));
+
+        const prompt = `Analyze the following transaction details and categorize it accurately:
+Transaction Description: "${description.trim()}"
+Transaction Type: ${type || 'EXPENSE'}
+Available Categories: ${JSON.stringify(categoryOptions)}
+
+Evaluate if any existing category fits best. If none fit closely, suggest a new, concise, professional category name.`;
+
+        const response = await ai.models.generateContent({
+          model: "gemini-3.8-flash",
+          contents: prompt,
+          config: {
+            systemInstruction: "You are an intelligent financial assistant that classifies transaction descriptions into appropriate categories. Return valid JSON matching the schema precisely.",
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                suggestedCategoryId: {
+                  type: Type.STRING,
+                  description: "ID of the best matching category from available categories, or null if a new category is better"
+                },
+                suggestedCategoryName: {
+                  type: Type.STRING,
+                  description: "Name of the matched existing category OR suggested clean title for a new category"
+                },
+                confidence: {
+                  type: Type.STRING,
+                  description: "HIGH, MEDIUM, or LOW"
+                },
+                reasoning: {
+                  type: Type.STRING,
+                  description: "A concise 1-sentence explanation of why this category fits"
+                },
+                isNewCategory: {
+                  type: Type.BOOLEAN,
+                  description: "True if no existing category matched and a new category name was proposed"
+                }
+              },
+              required: ["suggestedCategoryName", "confidence", "reasoning", "isNewCategory"]
+            }
+          }
+        });
+
+        const parsed = JSON.parse(response.text || '{}');
+        
+        // Validate if suggestedCategoryId actually exists in availableCategories
+        let matchedCatId = parsed.suggestedCategoryId;
+        if (matchedCatId) {
+          const exists = availableCategories.some((c: any) => String(c.id) === String(matchedCatId));
+          if (!exists) matchedCatId = null;
+        }
+
+        return res.json({
+          suggestedCategoryId: matchedCatId || null,
+          suggestedCategoryName: parsed.suggestedCategoryName || 'General',
+          confidence: parsed.confidence || 'MEDIUM',
+          reasoning: parsed.reasoning || 'Categorized using AI description analysis.',
+          isNewCategory: !matchedCatId && (parsed.isNewCategory || true),
+          aiPowered: true
+        });
+      } catch (err: any) {
+        console.error("Gemini AI Category Suggestion error:", err);
+      }
+    }
+
+    // Fallback if AI fails or process.env.GEMINI_API_KEY is absent
+    const fallbackResult = fallbackSuggestCategory(description, type, availableCategories);
+    return res.json(fallbackResult);
+  });
+
+  app.post("/api/ai/batch-suggest-categories", authenticateToken, async (req: any, res) => {
+    const { items, categories } = req.body; // items: Array<{ id?: string, description: string, type?: string }>
+
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: "Items array is required" });
+    }
+
+    const availableCategories = categories || db.prepare("SELECT id, name, type FROM categories WHERE (userId IS NULL OR userId = ?) AND deleted_at IS NULL").all(req.user.id);
+    const ai = getGenAI();
+
+    if (ai) {
+      try {
+        const categoryOptions = availableCategories.map((c: any) => ({
+          id: String(c.id),
+          name: c.name,
+          type: c.type || 'EXPENSE'
+        }));
+
+        const itemsToCategorize = items.map((item: any, index: number) => ({
+          itemKey: item.id || `item_${index}`,
+          description: item.description || '',
+          type: item.type || 'EXPENSE'
+        }));
+
+        const prompt = `Classify each of the following transaction descriptions into the best category.
+Available Categories: ${JSON.stringify(categoryOptions)}
+Transactions to classify: ${JSON.stringify(itemsToCategorize)}
+
+Return a JSON array of classifications for each itemKey.`;
+
+        const response = await ai.models.generateContent({
+          model: "gemini-3.8-flash",
+          contents: prompt,
+          config: {
+            systemInstruction: "You are an intelligent financial assistant. Categorize each transaction description carefully into available categories or suggest a new category name.",
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  itemKey: { type: Type.STRING },
+                  suggestedCategoryId: { type: Type.STRING },
+                  suggestedCategoryName: { type: Type.STRING },
+                  confidence: { type: Type.STRING },
+                  reasoning: { type: Type.STRING },
+                  isNewCategory: { type: Type.BOOLEAN }
+                },
+                required: ["itemKey", "suggestedCategoryName", "confidence", "reasoning"]
+              }
+            }
+          }
+        });
+
+        const parsedList = JSON.parse(response.text || '[]');
+        return res.json({ suggestions: parsedList, aiPowered: true });
+      } catch (err: any) {
+        console.error("Gemini AI Batch Category Suggestion error:", err);
+      }
+    }
+
+    // Fallback batch categorization
+    const suggestions = items.map((item: any, index: number) => {
+      const itemKey = item.id || `item_${index}`;
+      const fb = fallbackSuggestCategory(item.description || '', item.type || 'EXPENSE', availableCategories);
+      return {
+        itemKey,
+        ...fb
+      };
+    });
+
+    return res.json({ suggestions, aiPowered: false });
+  });
+
+  // Heuristic fallback for comprehensive spending insights & budget optimization
+  function generateFallbackSpendingInsights(
+    categories: Array<{ category: string; amount: number; percentage: number; count: number; sampleDescriptions?: string[] }>,
+    totalExpenses: number,
+    totalIncome: number,
+    currency: string = 'USD',
+    transactionCount: number = 0
+  ) {
+    const discretionaryKeywords = ['food', 'dining', 'restaurant', 'cafe', 'entertainment', 'subscription', 'software', 'streaming', 'shopping', 'clothing', 'coffee', 'travel', 'hobbies'];
+    
+    const categoryBenchmarks: Record<string, number> = {
+      'housing': 30,
+      'rent': 30,
+      'mortgage': 30,
+      'groceries': 15,
+      'food & dining': 12,
+      'dining': 10,
+      'transportation': 12,
+      'fuel & vehicle': 8,
+      'utilities': 8,
+      'entertainment': 5,
+      'software & subscriptions': 5,
+      'shopping': 7,
+      'healthcare': 6,
+      'education': 5
+    };
+
+    const topSpendingCategories = categories.map((cat, idx) => {
+      const catLower = cat.category.toLowerCase();
+      const benchmark = Object.entries(categoryBenchmarks).find(([k]) => catLower.includes(k))?.[1] || 10;
+      
+      let status: 'optimal' | 'moderate' | 'excessive' = 'optimal';
+      if (cat.percentage > benchmark * 1.5) {
+        status = 'excessive';
+      } else if (cat.percentage > benchmark) {
+        status = 'moderate';
+      }
+
+      return {
+        category: cat.category,
+        amount: cat.amount,
+        percentage: cat.percentage,
+        transactionCount: cat.count,
+        averagePerTransaction: cat.count > 0 ? Math.round((cat.amount / cat.count) * 100) / 100 : cat.amount,
+        trend: idx === 0 ? 'increasing' : (idx % 2 === 0 ? 'stable' : 'decreasing') as 'increasing' | 'decreasing' | 'stable',
+        benchmarkPercentage: benchmark,
+        status,
+        analysis: status === 'excessive' 
+          ? `Consumes ${cat.percentage}% of overall expenses, which exceeds the healthy ~${benchmark}% allocation benchmark.`
+          : status === 'moderate'
+          ? `Moderate allocation at ${cat.percentage}%, slightly above the target ~${benchmark}% baseline.`
+          : `Well balanced at ${cat.percentage}% of overall expenses, aligned with typical financial guidelines.`
+      };
+    });
+
+    const budgetOptimizations: Array<{
+      category: string;
+      currentSpend: number;
+      suggestedBudget: number;
+      potentialMonthlySavings: number;
+      savingsPercentage: number;
+      priority: 'HIGH' | 'MEDIUM' | 'LOW';
+      rationale: string;
+      actionPlan: string;
+    }> = [];
+
+    let totalMonthlyPotentialSavings = 0;
+
+    categories.forEach((cat) => {
+      const catLower = cat.category.toLowerCase();
+      const isDiscretionary = discretionaryKeywords.some(kw => catLower.includes(kw));
+      
+      if (isDiscretionary || cat.percentage >= 15) {
+        const reductionRate = cat.percentage >= 25 ? 0.25 : (isDiscretionary ? 0.20 : 0.15);
+        const savings = Math.round(cat.amount * reductionRate);
+        if (savings > 5) {
+          const suggested = Math.round(cat.amount - savings);
+          totalMonthlyPotentialSavings += savings;
+
+          const priority: 'HIGH' | 'MEDIUM' | 'LOW' = savings > 100 || cat.percentage >= 25 ? 'HIGH' : (savings > 40 ? 'MEDIUM' : 'LOW');
+          
+          let actionPlan = `Cap monthly spend for ${cat.category} to ${suggested} ${currency} by establishing weekly spending checkpoints.`;
+          if (catLower.includes('food') || catLower.includes('dining')) {
+            actionPlan = `Batch cook 2 additional meals per week and limit restaurant delivery to once weekly.`;
+          } else if (catLower.includes('subscription') || catLower.includes('software')) {
+            actionPlan = `Audit active monthly recurring subscriptions and consolidate overlapping digital services.`;
+          } else if (catLower.includes('shopping')) {
+            actionPlan = `Enforce a 48-hour consideration rule on non-essential online retail purchases.`;
+          }
+
+          budgetOptimizations.push({
+            category: cat.category,
+            currentSpend: cat.amount,
+            suggestedBudget: suggested,
+            potentialMonthlySavings: savings,
+            savingsPercentage: Math.round(reductionRate * 100),
+            priority,
+            rationale: `${cat.category} accounts for ${cat.percentage}% of total expenses. A ${Math.round(reductionRate * 100)}% trim directly improves cash flow reserves.`,
+            actionPlan
+          });
+        }
+      }
+    });
+
+    if (budgetOptimizations.length === 0 && categories.length > 0) {
+      const top = categories[0];
+      const savings = Math.max(10, Math.round(top.amount * 0.15));
+      totalMonthlyPotentialSavings += savings;
+      budgetOptimizations.push({
+        category: top.category,
+        currentSpend: top.amount,
+        suggestedBudget: Math.max(0, Math.round(top.amount - savings)),
+        potentialMonthlySavings: savings,
+        savingsPercentage: 15,
+        priority: 'MEDIUM',
+        rationale: `Targeting an achievable 15% optimization on your largest expense category (${top.category}).`,
+        actionPlan: `Set a weekly tracking checkpoint to prevent incremental budget slippage.`
+      });
+    }
+
+    const netSavings = totalIncome - totalExpenses;
+    const savingsRate = totalIncome > 0 ? (netSavings / totalIncome) * 100 : 0;
+    let score = 72;
+    if (savingsRate >= 20) score += 18;
+    else if (savingsRate >= 10) score += 10;
+    else if (savingsRate < 0) score -= 22;
+
+    if (categories.length >= 3) score += 5;
+    score = Math.max(30, Math.min(97, score));
+
+    let healthStatus: 'Excellent' | 'Good' | 'Needs Attention' | 'Critical' = 'Good';
+    if (score >= 85) healthStatus = 'Excellent';
+    else if (score >= 70) healthStatus = 'Good';
+    else if (score >= 50) healthStatus = 'Needs Attention';
+    else healthStatus = 'Critical';
+
+    const projectedAnnualSavings = totalMonthlyPotentialSavings * 12;
+
+    return {
+      financialHealthScore: score,
+      healthStatus,
+      executiveSummary: `Analyzed ${transactionCount} transactions totaling ${totalExpenses.toLocaleString()} ${currency} in expenses. Top categories account for ${categories.slice(0, 3).reduce((a, b) => a + b.percentage, 0).toFixed(1)}% of outgoing cash flow. Targeted budget optimizations can unlock up to ${totalMonthlyPotentialSavings.toLocaleString()} ${currency} in monthly savings.`,
+      topSpendingCategories,
+      budgetOptimizations: budgetOptimizations.slice(0, 6),
+      projectedMonthlySavings: totalMonthlyPotentialSavings,
+      projectedAnnualSavings,
+      smartMilestones: [
+        {
+          title: "90-Day Emergency Buffer",
+          targetAmount: totalMonthlyPotentialSavings * 3,
+          timeframeMonths: 3,
+          description: `Direct monthly category savings to construct a protected 3-month operating safety net.`
+        },
+        {
+          title: "12-Month Compound Wealth Goal",
+          targetAmount: projectedAnnualSavings,
+          timeframeMonths: 12,
+          description: `Achieve a total of ${projectedAnnualSavings.toLocaleString()} ${currency} in cumulative retained savings across all optimized categories.`
+        }
+      ],
+      keyRisks: [
+        categories.some(c => c.percentage > 35) ? `Category concentration: Largest category represents over 35% of total outflows.` : `Maintain continuous monitoring across monthly recurring bills.`,
+        savingsRate < 10 ? `Net savings rate is currently below 10%. Prioritize high-priority budget adjustments.` : `Automate transfers for freed-up savings directly into reserve accounts.`
+      ],
+      aiPowered: false,
+      analyzedTransactionsCount: transactionCount,
+      generatedAt: new Date().toISOString()
+    };
+  }
+
+  // --- AI Spending Insights & Budget Optimization Endpoint ---
+  app.post("/api/ai/spending-insights", authenticateToken, async (req: any, res) => {
+    try {
+      const { transactions = [], currency = 'USD' } = req.body;
+
+      const expenseTransactions = (Array.isArray(transactions) ? transactions : [])
+        .filter((t: any) => (t.type === 'EXPENSE' || t.type === 'expense') && (t.status === 'ACTIVE' || !t.status));
+
+      const totalExpenses = expenseTransactions.reduce((acc: number, t: any) => acc + (Number(t.amount) || 0), 0);
+
+      const categoryMap = new Map<string, { total: number; count: number; items: string[] }>();
+      expenseTransactions.forEach((t: any) => {
+        const cat = t.categoryName || 'Other';
+        const cur = categoryMap.get(cat) || { total: 0, count: 0, items: [] };
+        cur.total += Number(t.amount) || 0;
+        cur.count += 1;
+        if (t.description && cur.items.length < 5) {
+          cur.items.push(t.description);
+        }
+        categoryMap.set(cat, cur);
+      });
+
+      const aggregatedCategories = Array.from(categoryMap.entries()).map(([cat, data]) => ({
+        category: cat,
+        amount: Math.round(data.total * 100) / 100,
+        percentage: totalExpenses > 0 ? Math.round((data.total / totalExpenses) * 1000) / 10 : 0,
+        count: data.count,
+        sampleDescriptions: data.items
+      })).sort((a, b) => b.amount - a.amount);
+
+      const incomeTransactions = (Array.isArray(transactions) ? transactions : [])
+        .filter((t: any) => (t.type === 'INCOME' || t.type === 'income') && (t.status === 'ACTIVE' || !t.status));
+      const totalIncome = incomeTransactions.reduce((acc: number, t: any) => acc + (Number(t.amount) || 0), 0);
+      const netSavings = totalIncome - totalExpenses;
+      const savingsRate = totalIncome > 0 ? Math.round((netSavings / totalIncome) * 100) : 0;
+
+      const ai = getGenAI();
+      if (ai && aggregatedCategories.length > 0) {
+        try {
+          const prompt = `Analyze this user's transaction data to evaluate top spending categories and recommend high-impact budget optimizations:
+Currency: ${currency}
+Total Income: ${totalIncome}
+Total Expenses: ${totalExpenses}
+Net Savings: ${netSavings} (Savings Rate: ${savingsRate}%)
+Expense Categories Summary:
+${JSON.stringify(aggregatedCategories, null, 2)}
+
+Provide:
+1. Executive summary of spending behavior and allocation health.
+2. Top spending categories evaluated against healthy budgeting benchmarks with status ('optimal', 'moderate', or 'excessive').
+3. Practical budget optimizations for high-spend and discretionary categories, with concrete suggested budget targets, monthly savings potential, and specific action steps.
+4. An overall financial health score (0-100) and health status ('Excellent', 'Good', 'Needs Attention', or 'Critical').
+5. Projected monthly and annual savings, smart milestones, and key financial risks.`;
+
+          const response = await ai.models.generateContent({
+            model: "gemini-3.8-flash",
+            contents: prompt,
+            config: {
+              systemInstruction: "You are an elite Certified Financial Planner (CFP) and AI financial advisor. Analyze transaction spending distributions, pinpoint overspending, and craft actionable, realistic budget optimizations. Return valid JSON precisely matching the schema.",
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  financialHealthScore: {
+                    type: Type.INTEGER,
+                    description: "Score from 0 to 100 indicating financial wellness"
+                  },
+                  healthStatus: {
+                    type: Type.STRING,
+                    description: "One of: 'Excellent', 'Good', 'Needs Attention', 'Critical'"
+                  },
+                  executiveSummary: {
+                    type: Type.STRING,
+                    description: "2-3 sentences summarizing spending trends, category weights, and optimization opportunities"
+                  },
+                  topSpendingCategories: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        category: { type: Type.STRING },
+                        amount: { type: Type.NUMBER },
+                        percentage: { type: Type.NUMBER },
+                        transactionCount: { type: Type.INTEGER },
+                        averagePerTransaction: { type: Type.NUMBER },
+                        trend: { type: Type.STRING, description: "'increasing', 'decreasing', or 'stable'" },
+                        benchmarkPercentage: { type: Type.NUMBER },
+                        status: { type: Type.STRING, description: "'optimal', 'moderate', or 'excessive'" },
+                        analysis: { type: Type.STRING }
+                      },
+                      required: ["category", "amount", "percentage", "trend", "status", "analysis"]
+                    }
+                  },
+                  budgetOptimizations: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        category: { type: Type.STRING },
+                        currentSpend: { type: Type.NUMBER },
+                        suggestedBudget: { type: Type.NUMBER },
+                        potentialMonthlySavings: { type: Type.NUMBER },
+                        savingsPercentage: { type: Type.NUMBER },
+                        priority: { type: Type.STRING, description: "'HIGH', 'MEDIUM', or 'LOW'" },
+                        rationale: { type: Type.STRING },
+                        actionPlan: { type: Type.STRING }
+                      },
+                      required: ["category", "currentSpend", "suggestedBudget", "potentialMonthlySavings", "priority", "rationale", "actionPlan"]
+                    }
+                  },
+                  projectedMonthlySavings: { type: Type.NUMBER },
+                  projectedAnnualSavings: { type: Type.NUMBER },
+                  smartMilestones: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        title: { type: Type.STRING },
+                        targetAmount: { type: Type.NUMBER },
+                        timeframeMonths: { type: Type.INTEGER },
+                        description: { type: Type.STRING }
+                      },
+                      required: ["title", "targetAmount", "timeframeMonths", "description"]
+                    }
+                  },
+                  keyRisks: {
+                    type: Type.ARRAY,
+                    items: { type: Type.STRING }
+                  }
+                },
+                required: [
+                  "financialHealthScore",
+                  "healthStatus",
+                  "executiveSummary",
+                  "topSpendingCategories",
+                  "budgetOptimizations",
+                  "projectedMonthlySavings",
+                  "projectedAnnualSavings"
+                ]
+              }
+            }
+          });
+
+          const parsed = JSON.parse(response.text || '{}');
+          return res.json({
+            ...parsed,
+            aiPowered: true,
+            analyzedTransactionsCount: expenseTransactions.length,
+            generatedAt: new Date().toISOString()
+          });
+        } catch (geminiErr: any) {
+          console.error("Gemini AI Spending Insights error:", geminiErr);
+        }
+      }
+
+      // Fallback
+      const fallbackResult = generateFallbackSpendingInsights(
+        aggregatedCategories,
+        totalExpenses,
+        totalIncome,
+        currency,
+        expenseTransactions.length
+      );
+      return res.json(fallbackResult);
+    } catch (err: any) {
+      console.error("Spending insights error:", err);
+      res.status(500).json({ error: err.message || "Failed to generate spending insights" });
     }
   });
 

@@ -5,6 +5,7 @@ import { Plus, Edit2, Trash2, Copy, X, RefreshCw, Calendar, Tag, ArrowUpCircle, 
 import { motion, AnimatePresence } from 'motion/react';
 import * as XLSX from 'xlsx';
 import DeleteConfirmationModal from './DeleteConfirmationModal';
+import AiCategorySuggestionBadge from './AiCategorySuggestionBadge';
 import { 
   subscribeToRecurringTransactions, 
   subscribeToCategories,
@@ -497,6 +498,14 @@ export default function RecurringTransactions() {
                     onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                     className="w-full px-4 py-2 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100"
                     placeholder="Rent, Netflix, etc."
+                  />
+                  <AiCategorySuggestionBadge
+                    description={formData.description}
+                    type={formData.type}
+                    categories={categories}
+                    currentCategoryId={formData.categoryId}
+                    onSelectCategory={(catId) => setFormData(prev => ({ ...prev, categoryId: catId }))}
+                    userId={user?.id?.toString()}
                   />
                 </div>
 

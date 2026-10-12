@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { Transaction, Budget, Category } from '../types';
+import { Transaction, Category } from '../types';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
   PieChart, Pie, Cell, Legend, AreaChart, Area
@@ -8,15 +8,15 @@ import {
 import { formatCurrency, t } from '../utils/i18n';
 import { 
   ArrowUpCircle, ArrowDownCircle, Wallet, TrendingUp, TrendingDown, 
-  Eye, EyeOff, Target, PiggyBank, Percent, Calendar, Plus, X
+  Eye, EyeOff, PiggyBank, Percent, Calendar, Plus, X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { subscribeToTransactions, subscribeToBudgets, subscribeToCategories, addTransaction } from '../services/firestoreService';
+import { subscribeToTransactions, subscribeToCategories, addTransaction } from '../services/firestoreService';
+import AiInsightsModule from './AiInsightsModule';
 
 export default function Dashboard() {
   const { user } = useAuth();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [budgets, setBudgets] = useState<Budget[]>([]);
   const [loading, setLoading] = useState(true);
   const [showBalance, setShowBalance] = useState(false);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
@@ -54,17 +54,12 @@ export default function Dashboard() {
       setLoading(false);
     });
 
-    const unsubBudgets = subscribeToBudgets(user.id.toString(), (data) => {
-      setBudgets(data);
-    });
-
     const unsubCategories = subscribeToCategories(user.id.toString(), (data) => {
       setCategories(data);
     });
 
     return () => {
       unsubTransactions();
-      unsubBudgets();
       unsubCategories();
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
     };
@@ -116,8 +111,6 @@ export default function Dashboard() {
   const totalExpense = activeTransactions
     .filter(t => t.type === 'EXPENSE')
     .reduce((acc, t) => acc + t.amount, 0);
-
-  const totalBudget = budgets.reduce((acc, b) => acc + b.amount, 0);
 
   const balance = totalIncome - totalExpense;
 
@@ -209,7 +202,7 @@ export default function Dashboard() {
         <p className="text-muted-foreground">Welcome back! Here's an overview of your finances.</p>
       </header>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-3">
         <motion.div 
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -222,23 +215,6 @@ export default function Dashboard() {
             <div>
               <p className="text-sm font-medium text-muted-foreground">{t('income', lang)}</p>
               <h2 className="text-2xl font-bold text-emerald-600">{formatCurrency(totalIncome, currency, lang)}</h2>
-            </div>
-          </div>
-        </motion.div>
-
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.05 }}
-          className="p-6 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm"
-        >
-          <div className="flex items-center gap-4">
-            <div className="p-3 bg-purple-100 dark:bg-purple-900/30 text-purple-600 rounded-xl">
-              <Target size={24} />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-muted-foreground">{t('budgets', lang)}</p>
-              <h2 className="text-2xl font-bold text-purple-600">{formatCurrency(totalBudget, currency, lang)}</h2>
             </div>
           </div>
         </motion.div>
@@ -379,6 +355,9 @@ export default function Dashboard() {
           </motion.div>
         </div>
       </section>
+
+      {/* AI-Powered Insights & Budget Optimization Dashboard Module */}
+      <AiInsightsModule transactions={transactions} />
 
       <div className="grid gap-8 md:grid-cols-2">
         <div className="p-6 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
