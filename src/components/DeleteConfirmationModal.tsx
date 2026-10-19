@@ -21,25 +21,31 @@ export default function DeleteConfirmationModal({
   onCancel,
   isLoading = false
 }: DeleteConfirmationModalProps) {
-  // Prevent double-clicking
-  const [clicked, setClicked] = React.useState(false);
+  const [isSubmitting, setIsSubmitting] = React.useState(false);
 
   React.useEffect(() => {
-    if (!isOpen || !isLoading) {
-      setClicked(false);
+    if (!isOpen) {
+      setIsSubmitting(false);
     }
-  }, [isOpen, isLoading]);
+  }, [isOpen]);
 
-  const handleConfirm = async () => {
-    if (clicked || isLoading) return;
-    setClicked(true);
+  const handleConfirm = async (e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    if (isSubmitting || isLoading) return;
+    setIsSubmitting(true);
     try {
       await onConfirm();
     } catch (err) {
-      setClicked(false);
-      console.error(err);
+      console.error('Error during delete confirmation:', err);
+    } finally {
+      setIsSubmitting(false);
     }
   };
+
+  const busy = isLoading || isSubmitting;
 
   return (
     <AnimatePresence>
@@ -50,7 +56,7 @@ export default function DeleteConfirmationModal({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            onClick={isLoading ? undefined : onCancel}
+            onClick={busy ? undefined : onCancel}
             className="fixed inset-0 bg-black/60 backdrop-blur-xs cursor-pointer"
           />
 
@@ -91,7 +97,7 @@ export default function DeleteConfirmationModal({
             <div className="mt-6 flex justify-end gap-3">
               <button
                 type="button"
-                disabled={isLoading || clicked}
+                disabled={busy}
                 onClick={onCancel}
                 className="px-4 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300 bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-750 rounded-xl hover:bg-zinc-150 dark:hover:bg-zinc-700 disabled:opacity-50 transition-all cursor-pointer"
               >
@@ -99,11 +105,11 @@ export default function DeleteConfirmationModal({
               </button>
               <button
                 type="button"
-                disabled={isLoading || clicked}
+                disabled={busy}
                 onClick={handleConfirm}
                 className="relative min-w-[80px] px-4 py-2 text-xs font-semibold text-white bg-red-600 dark:bg-red-700 rounded-xl hover:bg-red-500 dark:hover:bg-red-650 disabled:opacity-50 transition-all flex items-center justify-center gap-1.5 shadow-md shadow-red-500/10 cursor-pointer"
               >
-                {(isLoading || clicked) ? (
+                {busy ? (
                   <>
                     <Loader2 size={14} className="animate-spin" />
                     <span>Deleting</span>

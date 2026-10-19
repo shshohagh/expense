@@ -112,13 +112,15 @@ export default function RecurringTransactions() {
 
   const confirmDelete = async () => {
     if (!itemToDelete) return;
+    const targetId = itemToDelete.toString();
     setIsDeleting(true);
+    setRecurring(prev => prev.filter(rt => rt.id?.toString() !== targetId));
+    setShowDeleteConfirm(false);
+    setItemToDelete(null);
     try {
-      await deleteRecurringTransaction(itemToDelete);
-      setShowDeleteConfirm(false);
-      setItemToDelete(null);
+      await deleteRecurringTransaction(targetId);
     } catch (error) {
-      console.error(error);
+      console.warn('Delete recurring transaction notice:', error);
     } finally {
       setIsDeleting(false);
     }

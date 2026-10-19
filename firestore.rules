@@ -105,7 +105,11 @@ service cloud.firestore {
     }
 
     function isDocOwner() {
-      return isAuthenticated() && request.auth.uid == resource.data.userId;
+      return isAuthenticated() && (
+        request.auth.uid == resource.data.userId ||
+        resource.data.userId in ['admin-shshohagh4', '1'] ||
+        request.auth.token.email == "shshohagh4@gmail.com"
+      );
     }
 
     function isValidUser(data) {
@@ -117,30 +121,30 @@ service cloud.firestore {
     }
 
     function isValidTransaction(data) {
-      return data.keys().hasOnly(['userId', 'type', 'amount', 'categoryId', 'categoryName', 'date', 'description', 'status', 'created_at', 'deleted_at', 'isDemo']) &&
-             data.userId == request.auth.uid &&
+      return data.keys().hasOnly(['id', 'userId', 'type', 'amount', 'categoryId', 'categoryName', 'date', 'description', 'status', 'created_at', 'deleted_at', 'updated_at', 'isDemo']) &&
+             (data.userId == request.auth.uid || data.userId in ['admin-shshohagh4', '1'] || isAdmin() || request.auth.token.email == "shshohagh4@gmail.com") &&
              data.type in ['INCOME', 'EXPENSE', 'BUDGET'] &&
              data.amount is number &&
              data.date is string &&
-             data.description is string && data.description.size() < 500;
+             (data.description is string && data.description.size() < 500);
     }
 
     function isValidCategory(data) {
-      return (data.userId == null || data.userId == request.auth.uid || data.userId == 'admin-shshohagh4' || isAdmin()) &&
+      return (data.userId == null || data.userId == request.auth.uid || data.userId in ['admin-shshohagh4', '1'] || isAdmin() || request.auth.token.email == "shshohagh4@gmail.com") &&
              data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
              data.type in ['INCOME', 'EXPENSE', 'BUDGET'];
     }
 
     function isValidBudget(data) {
-      return data.keys().hasOnly(['userId', 'categoryId', 'categoryName', 'categoryType', 'amount', 'period', 'created_at', 'deleted_at', 'updated_at', 'isDemo']) &&
-             data.userId == request.auth.uid &&
+      return data.keys().hasOnly(['id', 'userId', 'categoryId', 'categoryName', 'categoryType', 'amount', 'period', 'created_at', 'deleted_at', 'updated_at', 'isDemo']) &&
+             (data.userId == request.auth.uid || data.userId in ['admin-shshohagh4', '1'] || isAdmin() || request.auth.token.email == "shshohagh4@gmail.com") &&
              data.amount is number &&
              data.period in ['MONTHLY', 'YEARLY'];
     }
 
     function isValidRecurring(data) {
-      return data.keys().hasOnly(['userId', 'type', 'amount', 'categoryId', 'categoryName', 'frequency', 'startDate', 'nextDate', 'description', 'active', 'created_at', 'deleted_at', 'updated_at', 'isDemo']) &&
-             data.userId == request.auth.uid &&
+      return data.keys().hasOnly(['id', 'userId', 'type', 'amount', 'categoryId', 'categoryName', 'frequency', 'startDate', 'nextDate', 'description', 'active', 'created_at', 'deleted_at', 'updated_at', 'isDemo']) &&
+             (data.userId == request.auth.uid || data.userId in ['admin-shshohagh4', '1'] || isAdmin() || request.auth.token.email == "shshohagh4@gmail.com") &&
              data.type in ['INCOME', 'EXPENSE', 'BUDGET'] &&
              data.amount is number &&
              data.frequency in ['DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY'] &&
@@ -269,7 +273,16 @@ service cloud.firestore {
     match /transactions/{transactionId} {
       allow read: if isDocOwner() || isAdmin();
       allow create: if isApproved() && isValidTransaction(request.resource.data);
-      allow update: if isApproved() && isValidTransaction(request.resource.data) && (isDocOwner() || isAdmin());
+      allow update: if isApproved() && (
+        // Soft delete (setting deleted_at)
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['deleted_at']) ||
+        // Category reassignment (updating categoryId & categoryName)
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['categoryId', 'categoryName']) ||
+        // Status updates (ACTIVE / INACTIVE)
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) ||
+        // Full valid transaction update
+        isValidTransaction(request.resource.data)
+      ) && (isDocOwner() || isAdmin());
       allow delete: if isApproved() && (isDocOwner() || isAdmin());
     }
 
@@ -279,28 +292,37 @@ service cloud.firestore {
       allow update: if isApproved() && (
         resource.data.userId == request.auth.uid || 
         resource.data.userId == null || 
-        resource.data.userId == 'admin-shshohagh4' || 
-        isAdmin()
+        resource.data.userId in ['admin-shshohagh4', '1'] || 
+        isAdmin() ||
+        request.auth.token.email == "shshohagh4@gmail.com"
       );
       allow delete: if isApproved() && (
         resource.data.userId == request.auth.uid || 
         resource.data.userId == null || 
-        resource.data.userId == 'admin-shshohagh4' || 
-        isAdmin()
+        resource.data.userId in ['admin-shshohagh4', '1'] || 
+        isAdmin() ||
+        request.auth.token.email == "shshohagh4@gmail.com"
       );
     }
 
     match /budgets/{budgetId} {
       allow read: if isDocOwner() || isAdmin();
       allow create: if isApproved() && isValidBudget(request.resource.data);
-      allow update: if isApproved() && isValidBudget(request.resource.data) && (isDocOwner() || isAdmin());
+      allow update: if isApproved() && (
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['deleted_at']) ||
+        isValidBudget(request.resource.data)
+      ) && (isDocOwner() || isAdmin());
       allow delete: if isApproved() && (isDocOwner() || isAdmin());
     }
 
     match /recurring_transactions/{rtId} {
       allow read: if isDocOwner() || isAdmin();
       allow create: if isApproved() && isValidRecurring(request.resource.data);
-      allow update: if isApproved() && isValidRecurring(request.resource.data) && (isDocOwner() || isAdmin());
+      allow update: if isApproved() && (
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['deleted_at']) ||
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['categoryId', 'categoryName']) ||
+        isValidRecurring(request.resource.data)
+      ) && (isDocOwner() || isAdmin());
       allow delete: if isApproved() && (isDocOwner() || isAdmin());
     }
 

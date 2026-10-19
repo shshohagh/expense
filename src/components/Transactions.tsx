@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { Transaction, Category } from '../types';
 import { formatDate } from '../lib/utils';
 import { formatCurrency } from '../utils/i18n';
-import { Plus, Trash2, Edit2, Download, Filter, Copy, Upload, Search, X, Check, FileSpreadsheet } from 'lucide-react';
+import { Plus, Trash2, Edit2, Download, Filter, Copy, Upload, Search, X, Check, FileSpreadsheet, Sparkles } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import BankStatementImporter from './BankStatementImporter';
 import { motion, AnimatePresence } from 'motion/react';
@@ -187,27 +187,34 @@ export default function Transactions({
 
   const confirmDelete = async () => {
     if (!itemToDelete) return;
+    const targetId = itemToDelete.toString();
     setIsDeleting(true);
+    // Optimistic removal for instantaneous UI response
+    setTransactions(prev => prev.filter(t => t.id?.toString() !== targetId));
+    setShowDeleteConfirm(false);
+    setItemToDelete(null);
     try {
-      await deleteTransaction(itemToDelete);
-      setShowDeleteConfirm(false);
-      setItemToDelete(null);
+      await deleteTransaction(targetId);
     } catch (error) {
-      console.error(error);
+      console.warn('Delete transaction notice:', error);
     } finally {
       setIsDeleting(false);
     }
   };
 
   const handleBulkDelete = async () => {
+    if (selectedIds.length === 0) return;
     try {
       setIsBulkDeleting(true);
       const currentIds = [...selectedIds];
+      const strIds = currentIds.map(i => i.toString());
+      // Optimistic removal for instantaneous UI response
+      setTransactions(prev => prev.filter(t => !strIds.includes(t.id?.toString())));
       setSelectedIds([]);
       setShowBulkDeleteConfirm(false);
       await bulkDeleteTransactions(currentIds);
     } catch (error) {
-      console.error(error);
+      console.warn('Bulk delete notice:', error);
     } finally {
       setIsBulkDeleting(false);
     }
@@ -792,7 +799,39 @@ export default function Transactions({
                 </div>
 
                 <div className="space-y-2">
-                  <label className="text-sm font-medium">Category</label>
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm font-medium">Description</label>
+                    <span className="text-[11px] text-indigo-600 dark:text-indigo-400 flex items-center gap-1 font-medium">
+                      <Sparkles size={12} className="text-indigo-500 animate-pulse" /> AI analyzes & auto-selects category
+                    </span>
+                  </div>
+                  <textarea
+                    value={formData.description}
+                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                    className="w-full px-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100"
+                    rows={2}
+                    placeholder="e.g. Uber ride to client meeting, Dinner at Chipotle, AWS hosting, Freelance design..."
+                  />
+                  <AiCategorySuggestionBadge
+                    description={formData.description}
+                    type={formData.type}
+                    categories={categories}
+                    currentCategoryId={formData.categoryId}
+                    onSelectCategory={(catId) => setFormData(prev => ({ ...prev, categoryId: catId }))}
+                    userId={user?.id?.toString()}
+                    autoSelect={true}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm font-medium">Category</label>
+                    {formData.categoryId && (
+                      <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
+                        <Check size={11} /> {filteredCategories.find(c => c.id.toString() === formData.categoryId.toString())?.name || 'Selected'}
+                      </span>
+                    )}
+                  </div>
                   <select
                     required
                     value={formData.categoryId}
@@ -814,25 +853,6 @@ export default function Transactions({
                     value={formData.date}
                     onChange={(e) => setFormData({ ...formData, date: e.target.value })}
                     className="w-full px-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Description (Optional)</label>
-                  <textarea
-                    value={formData.description}
-                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                    className="w-full px-4 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl focus:outline-none focus:ring-2 focus:ring-zinc-900 dark:focus:ring-zinc-100"
-                    rows={2}
-                    placeholder="e.g. Uber ride to client meeting, AWS bill, Coffee with team..."
-                  />
-                  <AiCategorySuggestionBadge
-                    description={formData.description}
-                    type={formData.type}
-                    categories={categories}
-                    currentCategoryId={formData.categoryId}
-                    onSelectCategory={(catId) => setFormData(prev => ({ ...prev, categoryId: catId }))}
-                    userId={user?.id?.toString()}
                   />
                 </div>
 

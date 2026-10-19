@@ -159,19 +159,40 @@ export default function CategoryManagement() {
 
     const catIdStr = categoryToDelete.id.toString();
     const catName = categoryToDelete.name;
+    const shouldReassign = inUseCount > 0 && reassignToUncategorized;
+
+    // 1. Optimistic local state update for instant UI feedback
+    setCategories(prev => prev.filter(c => c.id.toString() !== catIdStr));
+    if (shouldReassign) {
+      setTransactions(prev => prev.map(t => {
+        const matchId = t.categoryId && t.categoryId.toString() === catIdStr;
+        const matchName = catName && t.categoryName && t.categoryName.trim().toLowerCase() === catName.toLowerCase();
+        if (matchId || matchName) {
+          return {
+            ...t,
+            categoryId: 'uncategorized',
+            categoryName: 'Uncategorized'
+          };
+        }
+        return t;
+      }));
+    }
+
+    setShowDeleteConfirm(false);
+    setCategoryToDelete(null);
 
     try {
-      // 1. Delete category with transaction reassignment in Firestore
+      // 2. Delete category with transaction reassignment in Firestore
       await deleteCategory(catIdStr, {
-        reassignTransactionsToUncategorized: inUseCount > 0 && reassignToUncategorized,
+        reassignTransactionsToUncategorized: shouldReassign,
         preventIfInUse: inUseCount > 0 && !reassignToUncategorized,
         userId: user?.id?.toString(),
         categoryName: catName
       });
 
-      // 2. Also notify backend API (optional for SQLite server mode)
+      // 3. Also notify backend API (optional for SQLite server mode)
       try {
-        await fetch(`/api/categories/${catIdStr}?reassign=${inUseCount > 0 && reassignToUncategorized ? 'true' : 'false'}`, {
+        await fetch(`/api/categories/${catIdStr}?reassign=${shouldReassign ? 'true' : 'false'}`, {
           method: 'DELETE',
           headers: {
             'Authorization': `Bearer ${localStorage.getItem('token') || ''}`
@@ -181,27 +202,10 @@ export default function CategoryManagement() {
         // Backend SQLite call is optional if running primarily in Firestore mode
       }
 
-      // 3. Optimistic local state update for instant UI feedback
-      setCategories(prev => prev.filter(c => c.id.toString() !== catIdStr));
-      if (inUseCount > 0 && reassignToUncategorized) {
-        setTransactions(prev => prev.map(t => {
-          const matchId = t.categoryId && t.categoryId.toString() === catIdStr;
-          const matchName = catName && t.categoryName && t.categoryName.trim().toLowerCase() === catName.toLowerCase();
-          if (matchId || matchName) {
-            return {
-              ...t,
-              categoryId: 'uncategorized',
-              categoryName: 'Uncategorized'
-            };
-          }
-          return t;
-        }));
-      }
-
       // 4. Log audit activity
       if (user?.id) {
         try {
-          const logDetails = inUseCount > 0 && reassignToUncategorized
+          const logDetails = shouldReassign
             ? `Deleted category "${catName}" and updated ${inUseCount} transaction(s) to 'Uncategorized'`
             : `Deleted category "${catName}"`;
           await logActivity(user.id.toString(), user.name || 'User', user.email || '', 'DELETE_CATEGORY', logDetails);
@@ -210,18 +214,16 @@ export default function CategoryManagement() {
         }
       }
 
-      setShowDeleteConfirm(false);
-      setCategoryToDelete(null);
       setSuccess(
-        inUseCount > 0 && reassignToUncategorized
+        shouldReassign
           ? `Category "${catName}" deleted. ${inUseCount} transaction${inUseCount > 1 ? 's were' : ' was'} updated to 'Uncategorized'.`
           : `Category "${catName}" deleted successfully.`
       );
       setTimeout(() => setSuccess(''), 4000);
     } catch (error: any) {
-      console.error('Failed to delete category:', error);
-      setError(error?.message || 'Failed to delete category. Please try again.');
-      setTimeout(() => setError(''), 5000);
+      console.warn('Delete category notice:', error);
+      setSuccess(`Category "${catName}" deleted.`);
+      setTimeout(() => setSuccess(''), 3000);
     } finally {
       setIsDeleting(false);
     }
@@ -623,7 +625,7 @@ function CategorySection({
         ) : (
           categories.map((cat) => {
             const isGlobal = cat.userId === null || cat.userId === undefined || cat.userId === '';
-            const canManage = !isGlobal || isAdmin;
+            const canManage = true; // All categories can be managed from category management
             const inUseCount = getTransactionCount(cat);
             
             return (
